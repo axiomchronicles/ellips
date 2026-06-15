@@ -1,52 +1,84 @@
 # Architecture
 
-ELIPS is layered with dependencies pointing inward toward the domain. Each layer
-talks to the next through a narrow port (interface), following hexagonal /
-clean-architecture principles.
+ELIPS is organized around a narrow core API and a small set of storage and
+query subsystems. The current architecture is document-aware rather than
+vector-only: every record may carry metadata, a source document attachment,
+chunk coordinates, and embedding lineage.
 
+```text
+Python modern API / Python core bindings / C++ SDK / CLI
+                         |
+                    ElipsInstance
+         lifecycle · config · vault registry · WAL attachment
+                         |
+                      Vault
+  record store · planner · metadata index · ANN / exact / GPU index
+                         |
+      ----------------------------------------------------------
+      |                     |                  |               |
+   Query path           Text path         Persistence      Locking
+ seek / scan / fetch  place_document     manifest/WAL     shared RO /
+ seek_text / hybrid   seek_text/hybrid   segments/snap    exclusive RW
 ```
-        Python SDK (PyBind11)        C++ SDK (elips.hpp)        elips CLI
-                     \                    |                    /
-                      \                   |                   /
-                                 ElipsInstance
-                  (lifecycle · config · vault registry · txn)
-                                       |
-        ┌──────────────┬──────────────┼──────────────┬───────────────┐
-   Query Engine    Vault /       Index Engine     Metadata        Storage
-     (EQL)       Vector Engine    (IndexPort)      (Filter)     (WAL+snapshot)
-                                       |                              |
-                              ExactIndex / HNSW              LockManager · disk
-```
 
-## Layers
+## Core Objects
 
-- **Domain** (`include/elips/domain`): pure value types — `Vector`, `RecordID`
-  (UUIDv7), `Record`, `Payload`, `SearchResult`, error hierarchy. No
-  infrastructure dependencies.
-- **Vector engine** (`vector_engine/Metrics`): ordering-normalized `distance()`
-  (smaller = more similar for every metric) with NEON SIMD kernels and a scalar
-  fallback behind a runtime-dispatch seam.
-- **Index engine** (`index_engine`): `IndexPort` abstraction; `ExactIndex`
-  (brute force, ground truth) and `HierarchicalGraphIndex` (HNSW). `make_index`
-  builds the configured backend.
-- **Metadata** (`metadata/Filter`): a predicate tree + fluent builder evaluated
-  against a record's `Payload`. Shared by the SDK and EQL.
-- **Query engine** (`query_engine`): EQL lexer → parser → AST → executor.
-- **Storage** (`storage`): `WAL`, `Serialization` (binary + CRC32C), atomic
-  snapshot. `kernel/LockManager` enforces single-writer locking.
-- **SDK** (`elips.hpp`): `open()`, `ElipsInstance`, `Vault`, `Transaction`.
+- `ElipsInstance`: top-level database handle. Owns vaults, persistence, locks,
+  and optional GPU backend state.
+- `Vault`: authoritative record store plus search planner and index.
+- `Record`: `id`, `vector`, `payload`, and optional `document`, `chunk`,
+  `lineage`.
+- `MetadataIndex`: exact-match accelerator used by the planner for equality and
+  set-membership filters.
+- `TextEmbedderPort`: optional core interface for native text ingestion and
+  text-first querying.
 
-## Key invariants
+## Query Path
 
-- `distance()` is ordering-normalized; all result lists sort ascending.
-- Cosine vectors are L2-normalized on ingest **and** query.
-- Writes are WAL-appended (and flushed) before in-memory state changes.
-- `RecordID` byte order equals UUIDv7 time order, so the record map iterates in
-  insertion-time order (deterministic snapshots).
+Every vector or hybrid query goes through `Vault::plan_seek()` first.
 
-## Design principles applied
+- `ann_index`: use the configured ANN or GPU index directly.
+- `exact_candidates`: restrict the search domain using `MetadataIndex`.
+- `full_scan`: fall back when the candidate set is small or the query shape
+  makes a scan cheaper.
+- `text_probe`: used for text-only search when no embedding stage is needed.
+- `hybrid_fusion`: combine vector distance with lexical overlap from attached
+  documents.
 
-SOLID, dependency inversion (consumers depend on `IndexPort`/`Filter`, never
-concretes), RAII everywhere (`LockManager`, WAL, smart pointers), immutability by
-default, and value semantics. See [ADRs](adr/) for the rationale behind each
-major choice.
+The planner emits `QueryPlan`, which is exposed in both C++ and Python for
+inspection and testing.
+
+## Persistence Path
+
+Persistent databases can run in two layouts:
+
+- Segmented mode, enabled by default: root `elips.manifest` plus one segment
+  file per vault under `segments/`.
+- Snapshot mode: a single `elips.snapshot` file for compatibility or when
+  segmented storage is disabled.
+
+All mutations are WAL-appended before in-memory mutation. WAL replay rebuilds
+the record store on open, including document attachments, chunk info, and
+embedding lineage.
+
+## Concurrency Model
+
+- One read-write opener at a time via an exclusive advisory lock.
+- Multiple read-only openers via shared advisory locks.
+- Read-only vaults reject `place`, `place_document`, `erase`, `rebuild_index`,
+  and `compact`-driven mutation paths with `StorageError`.
+
+ELIPS is an embedded engine, not a server. Process-level coordination is done
+through file locks rather than background daemons.
+
+## Python Surface
+
+There are two layers:
+
+- Low-level bindings: `open()`, `open_with_config()`, `Vault`, `Config`.
+- Modern wrapper: `connect()`, `Engine`, and `Arena` for typed text-first
+  ingestion and retrieval.
+
+The modern wrapper prefers native core text APIs when a `Config.text_embedder()`
+is configured and otherwise falls back to Python-side embedding plus hybrid
+querying.

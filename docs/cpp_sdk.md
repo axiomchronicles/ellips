@@ -1,75 +1,114 @@
 # C++ SDK
 
-Link against `elips_core` and include `<elips/elips.hpp>`.
+The C++ surface is the runtime's source of truth. It exposes typed
+configuration, document-aware records, planner introspection, persistence
+control, and optional GPU-backed indexes.
+
+## Minimal Example
 
 ```cpp
-#include <elips/elips.hpp>
+#include <memory>
+#include <string_view>
 
-auto db = elips::open("/data/vectors",
-    elips::Config{}.dimension(1536).metric(elips::Metric::cosine));
+#include "elips/elips.hpp"
+#include "elips/text_engine/TextEmbedderPort.hpp"
+
+class ToyEmbedder final : public elips::TextEmbedderPort {
+public:
+    [[nodiscard]] elips::Vector embed(std::string_view text) const override {
+        return elips::Vector{{text.find("alpha") != std::string_view::npos ? 1.0F : 0.0F,
+                              text.find("beta") != std::string_view::npos ? 1.0F : 0.0F}};
+    }
+
+    [[nodiscard]] std::string_view provider_name() const noexcept override {
+        return "demo";
+    }
+
+    [[nodiscard]] std::string_view model_name() const noexcept override {
+        return "toy";
+    }
+};
+
+auto db = elips::open(
+    ":memory:",
+    elips::Config{}
+        .dimension(2)
+        .metric(elips::Metric::cosine)
+        .text_embedder(std::make_shared<ToyEmbedder>()));
 
 auto& docs = db->vault("documents");
-
-const elips::RecordID id = docs.place(
-    elips::Vector{{0.1F, 0.2F, /* ... */}},
-    elips::Payload{{"title", std::string{"Doc"}}, {"year", std::int64_t{2024}}});
-
-for (const auto& hit : docs.seek(elips::Vector{query}, 10)) {
-    std::cout << hit.id.to_string() << ' ' << hit.distance << '\n';
-}
+docs.place_document("alpha design note", {{"kind", std::string{"design"}}});
+auto hits = docs.seek_text("alpha", 1);
 ```
 
-## Configuration
+## Primary Types
+
+- `elips::Config`: fluent configuration builder
+- `elips::ElipsInstance`: top-level database handle
+- `elips::Vault`: per-collection record store and query surface
+- `elips::DocumentAttachment`, `elips::ChunkInfo`, `elips::EmbeddingLineage`
+- `elips::QueryPlan`: planner output for vector and hybrid queries
+
+## Vault Operations
 
 ```cpp
-elips::Config{}
-    .dimension(768)
-    .metric(elips::Metric::euclidean)
-    .index(elips::IndexType::graph)                 // or ::exact
-    .graph_params({.max_connections = 16,
-                   .ef_construction = 200,
-                   .ef_search = 50})
-    .durability(elips::Durability::standard);       // paranoid|standard|relaxed|ephemeral
+auto& docs = db->vault("documents");
+
+docs.place(elips::Vector{{1.0F, 0.0F}}, {{"kind", std::string{"vector"}}});
+docs.place_document("alpha note", {{"kind", std::string{"text"}}});
+
+auto vector_hits = docs.seek(elips::Vector{{1.0F, 0.0F}}, 5);
+auto text_hits = docs.seek_text("alpha", 5);
+auto hybrid_hits = docs.seek_hybrid(elips::Vector{{0.0F, 1.0F}}, "alpha", 5);
+auto plan = docs.explain_seek(elips::Vector{{1.0F, 0.0F}}, 5,
+                              elips::Filter{}, std::nullopt, true);
 ```
 
-## Filters
+## Persistence
+
+Persistent opens support:
+
+- segmented storage via `Config::segmented_storage(true)`
+- metadata acceleration via `Config::metadata_acceleration(true)`
+- shared readers via `Config::access_mode(elips::AccessMode::read_only)`
+- `checkpoint()` and `compact()`
 
 ```cpp
-auto f = elips::Filter()
-    .field("category").equals(std::string{"tech"})
-    .field("year").ge(std::int64_t{2023});
+auto db = elips::open(
+    "/tmp/elips-cpp",
+    elips::Config{}.dimension(2).segmented_storage(true));
+db->compact();
 
-auto results = docs.seek(query, 10, f);             // filtered
-auto rows    = docs.scan(f);                        // metadata-only scan
+auto reader = elips::open(
+    "/tmp/elips-cpp",
+    elips::Config{}.access_mode(elips::AccessMode::read_only));
 ```
 
-## Transactions
+## Transactions And EQL
+
+Transactions buffer `place()` / `erase()` and commit atomically:
 
 ```cpp
-{
-    auto txn = db->begin_transaction();
-    auto v = txn.vault("documents");
-    v.place(vec1, payload1);
-    v.place(vec2, payload2);
-    txn.commit();                  // atomic; rolls back if the scope exits early
-}
+auto txn = db->begin_transaction();
+txn.vault("documents").place(elips::Vector{{1.0F, 0.0F}});
+txn.commit();
 ```
 
-## EQL
+EQL remains available for declarative vector operations:
 
 ```cpp
-auto hits = db->query(
-    "seek in documents nearest $q top 10 where year >= 2022 yield",
-    {{"q", elips::Vector{query}}});
+auto rows = db->query(
+    "seek in documents nearest $q top 10 where kind = \"design\" yield",
+    {{"q", elips::Vector{{1.0F, 0.0F}}}});
 ```
 
-## Lifecycle
+## Errors
 
-```cpp
-db->checkpoint();   // flush snapshot, truncate WAL
-db->close();        // checkpoint + release lock (idempotent)
-```
+All runtime errors derive from `elips::ElipsError`. Common subclasses:
 
-Errors derive from `elips::ElipsError` (`DimensionMismatch`, `InvalidVector`,
-`ConfigError`, `StorageError`, `NotFound`, `LockConflict`). Throw by value, catch
-by reference.
+- `DimensionMismatch`
+- `InvalidVector`
+- `ConfigError`
+- `StorageError`
+- `LockConflict`
+- `NotFound`

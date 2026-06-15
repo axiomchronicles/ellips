@@ -1,70 +1,116 @@
 # ELIPS
 
-**E**mbedded **L**ocal **I**ndex & **P**ersistence **S**ystem — an embedded,
-in-process vector database. SQLite for vectors: no server, no port, no daemon.
-`#include` it or `import` it and go.
+Embedded Local Index & Persistence System.
+
+ELIPS is an in-process vector and document retrieval engine built in C++23 with
+native Python bindings. It keeps the embedded deployment model of SQLite, but
+adds ANN indexes, typed metadata filters, first-class document lineage, hybrid
+retrieval, segmented persistence, and optional GPU-backed indexes.
+
+```python
+from __future__ import annotations
+
+import elips
+
+
+def toy_embed(texts: list[str]) -> list[list[float]]:
+    return [
+        [
+            1.0 if "alpha" in text.lower() else 0.0,
+            1.0 if "beta" in text.lower() else 0.0,
+        ]
+        for text in texts
+    ]
+
+
+engine = elips.connect(":memory:", dimension=2, embedder=toy_embed)
+arena = engine.arena("documents")
+arena.ingest(
+    texts=["alpha design note", "beta incident runbook"],
+    meta=[{"kind": "design"}, {"kind": "ops"}],
+)
+
+for hit in arena.probe_text("alpha", top=2):
+    print(hit.key, hit.distance, hit.text, hit.meta)
+```
+
+## What Is Implemented
+
+- Vector search with `graph` (HNSW) and `exact` indexes
+- GPU index selection through the main `open()` / index factory path
+- First-class `DocumentAttachment`, `ChunkInfo`, and `EmbeddingLineage`
+- Native `place_document()`, `seek_text()`, `seek_hybrid()`, and `explain_seek()`
+- Metadata acceleration for equality filters via `MetadataIndex`
+- Segmented persistence with `elips.manifest` plus per-vault segment files
+- `compact()` to rebuild indexes and rewrite the segment set
+- Shared read-only mode with advisory locks
+- WAL crash recovery, snapshot compatibility, typed filters, EQL, Python bindings
+
+## Quick Start
+
+Build the core and run the C++ and Python tests:
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DELIPS_BUILD_PYTHON=ON
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+PYTHONPATH=bindings/python python3 tests/python/test_bindings.py
+```
+
+Minimal low-level Python usage:
 
 ```python
 import elips
 
-db = elips.open("/data/vectors", dimension=1536, metric="cosine")
+config = (
+    elips.Config()
+    .dimension(2)
+    .metric("cosine")
+    .segmented_storage(True)
+    .metadata_acceleration(True)
+    .text_embedder(toy_embed, provider="demo", model="toy")
+)
+
+db = elips.open_with_config("/tmp/elips-demo", config)
 docs = db.vault("documents")
-docs.place(vector=embedding, data={"title": "Example", "year": 2024})
-
-for hit in docs.seek(vector=query, top=10):
-    print(hit.id, hit.distance, hit.data)
+docs.place_document("alpha design note", {"kind": "design"})
+docs.place_document("beta runbook", {"kind": "ops"})
+print(docs.seek_text("alpha", top=1)[0].document.text)
+db.compact()
+db.close()
 ```
 
-## Status
+## Storage Model
 
-This repository implements the ELIPS core and its surfaces from first
-principles in C++23:
+Persistent databases use:
 
-| Subsystem | Status |
-|---|---|
-| Domain model (Vector, Record, RecordID/UUIDv7, Payload) | ✅ |
-| Metrics: cosine, euclidean, dot product (NEON SIMD + scalar) | ✅ |
-| Indexes: `HierarchicalGraphIndex` (HNSW) + `ExactIndex` | ✅ |
-| Storage: snapshots, write-ahead log, crash recovery | ✅ |
-| Single-writer / multi-reader file locking | ✅ |
-| Metadata filtering + atomic transactions | ✅ |
-| EQL (lexer, parser, AST, executor) | ✅ |
-| `elips` CLI (info/vaults/query/export/import/verify/bench/…) | ✅ |
-| Python bindings (PyBind11) + `py.typed` | ✅ |
-| Benchmark suite | ✅ |
-
-See [docs/roadmap.md](docs/roadmap.md) for what is intentionally deferred
-(segments/compaction, MVCC version chains, quantized indexes, cloud adapters).
-
-## Build
-
-Requires CMake ≥ 3.24, Ninja, and a C++23 compiler (Clang 17+/GCC 13+).
-
-```bash
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
-ctest --test-dir build --output-on-failure
+```text
+/my_db/
+├── LOCK
+├── IDENTITY
+├── wal.log
+├── elips.manifest          # when segmented storage is enabled
+├── segments/
+│   ├── vault_0_<epoch>.segment
+│   └── vault_1_<epoch>.segment
+└── elips.snapshot          # compatibility / non-segmented mode
 ```
 
-Targets: `elips_core` (library), `elips` (CLI), `elips_bench`, `elips_tests`.
-
-### Python bindings
-
-```bash
-cmake -S . -B build -G Ninja -DELIPS_BUILD_PYTHON=ON
-cmake --build build --target elips_pymodule
-PYTHONPATH=bindings/python python3 -c "import elips; print(elips.__version__)"
-```
+Single-writer opens take an exclusive lock. Read-only opens take a shared lock
+and reject writes.
 
 ## Documentation
 
 - [Architecture](docs/architecture.md)
-- [Storage & recovery](docs/storage.md)
-- [EQL language guide](docs/eql.md)
-- [Python SDK](docs/python_sdk.md) · [C++ SDK](docs/cpp_sdk.md) · [CLI](docs/cli.md)
-- [Cookbook](docs/cookbook.md)
-- [Architecture Decision Records](docs/adr/)
+- [Storage](docs/storage.md)
+- [Python SDK](docs/python_sdk.md)
+- [C++ SDK](docs/cpp_sdk.md)
+- [Python Quickstart](docs/python/getting-started/quickstart.md)
+- [C++ Quickstart](docs/cpp/getting-started/quickstart.md)
+- [API references](docs/python/api-reference/) / [C++ API references](docs/cpp/api-reference/)
 
-## License
+## Status
 
-See repository for license terms.
+The remaining roadmap is now focused on future work such as MVCC/versioned
+reads, deeper text planning in EQL, quantized indexes, and broader distributed
+or cloud-oriented integrations. See [docs/roadmap.md](docs/roadmap.md).

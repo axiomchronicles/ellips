@@ -1,61 +1,84 @@
 # Storage & Recovery
 
-A database is a directory on the local filesystem:
+ELIPS persists a database directory and supports both manifest-based segmented
+storage and the original snapshot format.
 
-```
+## Files On Disk
+
+```text
 /my_db/
-├── LOCK             # advisory writer lock (flock)
-├── IDENTITY         # dimension, metric, index type (authoritative identity)
-├── elips.snapshot   # full consistent state (atomic temp-write + rename)
-└── wal.log          # write-ahead log since the last checkpoint
+├── LOCK
+├── IDENTITY
+├── wal.log
+├── elips.manifest        # segmented mode
+├── segments/
+│   └── vault_<n>_<epoch>.segment
+└── elips.snapshot        # snapshot mode or older databases
 ```
 
-## IDENTITY
+## Identity
 
-Written when the database is created. Format: `magic(0xE11D0001) | version |
-dimension(u16) | metric(u8) | index(u8)`. It is the source of truth for the
-database's shape and survives even before the first checkpoint, so a crash
-immediately after creation still reopens with the right configuration. A
-conflicting `dimension` passed to `open()` raises `ConfigError`.
+`IDENTITY` is the durable source of truth for:
 
-## Write path (durability)
+- vector dimension
+- metric
+- index type
 
-Every `place`/`erase` is appended to the WAL **before** memory is mutated. A
-record is framed:
+Existing databases always reopen with the persisted identity. Passing a
+conflicting dimension on reopen raises `ConfigError`.
 
-```
-magic(0xE1105E01) | op(u8) | vault(len+bytes) | id(16B)
-                  | [ dim(u16) | float32[dim] | payload ]      # insert only
-                  | crc32c(u32)
-```
+## WAL
 
-`Durability` controls flushing: `paranoid`/`standard` flush every record;
-`relaxed` buffers and flushes on checkpoint; `ephemeral` disables the WAL.
+Every write is appended to `wal.log` before the in-memory vault is mutated.
+
+Supported WAL operations:
+
+- `insert`
+- `erase`
+- `insert_ex` for records carrying `DocumentAttachment`, `ChunkInfo`, or
+  `EmbeddingLineage`
+
+This means crash recovery restores full record state, not only vectors and
+payloads.
+
+`Durability` controls flush behavior:
+
+- `paranoid` / `standard`: flush each write
+- `relaxed`: buffer until checkpoint or close
+- `ephemeral`: no WAL attachment
 
 ## Checkpoint
 
-`checkpoint()` serializes all vaults to `elips.snapshot.tmp`, atomically renames
-it over `elips.snapshot`, then truncates the WAL. `close()` checkpoints and
-releases the WAL + lock. The destructor checkpoints on graceful teardown.
+`checkpoint()` writes the current logical state to disk and truncates the WAL.
+
+- Segmented mode writes one fresh segment per vault, rewrites
+  `elips.manifest`, and removes obsolete segment files.
+- Snapshot mode writes `elips.snapshot.tmp`, atomically renames it to
+  `elips.snapshot`, and removes segmented artifacts.
+
+`compact()` rebuilds each vault index from the authoritative record store and
+then checkpoints.
 
 ## Recovery
 
-`open()`:
-1. Acquire the writer lock (`LockConflict` if held).
-2. Read `IDENTITY` (or create it for a new database).
-3. Load `elips.snapshot` if present (rebuilds vaults + indexes).
-4. Replay `wal.log` on top, applying inserts/erases.
-5. Validate each WAL record's CRC32C; stop at the first corrupt/truncated record
-   (the valid prefix is recovered — torn final writes are non-fatal).
-6. Attach a live WAL for subsequent appends.
+`open()` performs:
 
-Recovery is deterministic: the same on-disk state always yields the same
-in-memory state. `crash → reopen` replays exactly the writes that were durably
-logged.
+1. Acquire advisory lock.
+2. Read `IDENTITY`.
+3. Load `elips.manifest` + segments if present, otherwise load
+   `elips.snapshot` if present.
+4. Replay the valid WAL prefix.
+5. Attach a live WAL unless the open is read-only or `ephemeral`.
 
-## Notes & limitations (v1.0)
+Corrupt or truncated WAL tails are tolerated: replay stops at the first invalid
+record and preserves the valid prefix.
 
-- Serialization uses native byte order (single-machine embedded use). Cross-
-  platform artifacts require little-endian normalization (future).
-- Snapshots are whole-database rewrites; per-segment incremental persistence and
-  compaction are on the roadmap.
+## Read-Only Mode
+
+Read-only opens require an existing database and take a shared lock.
+
+- Multiple readers may coexist.
+- No WAL writer is attached.
+- Writes and maintenance operations raise `StorageError`.
+
+This is the supported mode for shared-reader analytics or serving flows.

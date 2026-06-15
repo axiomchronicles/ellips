@@ -1,401 +1,147 @@
 # Vault API Reference
 
-A `Vault` is a named partition of records within a database. Each vault owns its own index and is obtained via `db.vault("name")`.
+A `Vault` is a named partition inside a database. It owns the record store,
+search planner, metadata accelerator, and backing index.
 
-## Vault
+## Core Methods
 
-```python
-class Vault
-```
-
-A named partition of records within a database. Owns its index and the authoritative record store.
-
-### `Vault.name`
+### `place()`
 
 ```python
-@property
-def name(self) -> str
-```
-
-The vault's name.
-
-**Example:**
-
-```python
-docs = db.vault("documents")
-print(docs.name)  # "documents"
-```
-
-### `Vault.place()`
-
-```python
-def place(
-    self,
-    vector: Vector,
-    data: PayloadLike = {},
-    id: Optional[str] = None,
-) -> str
-```
-
-Ingest a single record. The vector is indexed immediately for future search.
-
-**Parameters:**
-
-| Name | Type | Default | Description |
-|---|---|---|---|
-| `vector` | `Vector` | required | The embedding vector (list or tuple of floats) |
-| `data` | `PayloadLike` | `{}` | Optional metadata payload — dict of `str` → `int` / `float` / `bool` / `str` |
-| `id` | `str` or `None` | `None` | Optional custom UUIDv7 record ID as hex string (36 chars). If `None`, a random UUIDv7 is generated |
-
-**Returns:** The record's UUIDv7 ID as a 36-character hex string.
-
-**Raises:**
-- `DimensionMismatch` — vector length does not match the vault's configured dimension
-- `InvalidVector` — vector contains `NaN`, `Inf`, or is otherwise unusable
-
-**Examples:**
-
-```python
-rid = docs.place([0.1, 0.2, 0.3])
-# → "018f3c7a-0000-7000-8000-000000000001"
-
-rid = docs.place(
-    [0.1, 0.2, 0.3],
-    data={"title": "Getting Started", "year": 2024, "pinned": True},
-)
-
-rid = docs.place(
-    [0.4, 0.5, 0.6],
-    id="00000000-0000-7000-8000-000000000001",
+rid = vault.place(
+    [1.0, 0.0],
+    {"kind": "design"},
+    document=elips.DocumentAttachment(text="alpha design note"),
+    chunk=chunk,
+    lineage=lineage,
 )
 ```
 
-Metadata values must be one of: `bool`, `int`, `float`, or `str`. Other types raise `TypeError`:
+Parameters:
+
+- `vector`: embedding vector
+- `data`: metadata payload
+- `id`: optional explicit UUIDv7 string
+- `document`: optional `DocumentAttachment`
+- `chunk`: optional `ChunkInfo`
+- `lineage`: optional `EmbeddingLineage`
+
+Returns the assigned record id.
+
+### `place_document()`
 
 ```python
-# OK
-docs.place([1.0], {"count": 42})         # int
-docs.place([1.0], {"ratio": 0.95})       # float
-docs.place([1.0], {"active": True})      # bool
-docs.place([1.0], {"name": "hello"})     # str
-
-# TypeError
-docs.place([1.0], {"tags": ["a", "b"]})  # list — not supported
-docs.place([1.0], {"obj": {"key": 1}})   # dict — not supported
+rid = vault.place_document("alpha design note", {"kind": "design"})
 ```
 
-### `Vault.place_many()`
+Requires a configured text embedder in `Config`. ELIPS embeds the text, stores
+the source document, fills chunk defaults when needed, and auto-generates
+lineage from the configured embedder when not provided.
+
+### `place_many()`
 
 ```python
-def place_many(self, records: Iterable[Mapping[str, Any]]) -> None
-```
-
-Batch-ingest multiple records. Each record is a dict with the following keys:
-
-| Key | Type | Required | Description |
-|---|---|---|---|
-| `vector` | `list[float]` | Yes | The embedding vector |
-| `data` | `dict` | No | Metadata payload |
-| `id` | `str` | No | Custom UUIDv7 record ID |
-
-**Raises:**
-- `DimensionMismatch` — any vector has wrong dimension
-- `InvalidVector` — any vector is invalid
-- `KeyError` — any record is missing the required `"vector"` key
-
-**Example:**
-
-```python
-docs.place_many([
-    {"vector": [1.0, 0.0, 0.0], "data": {"n": 1}},
-    {"vector": [0.0, 1.0, 0.0], "data": {"n": 2}},
-    {"vector": [0.0, 0.0, 1.0], "id": "00000000-0000-7000-8000-000000000002", "data": {"n": 3}},
+vault.place_many([
+    {"vector": [1.0, 0.0], "data": {"kind": "vector-only"}},
+    {"text": "alpha design note", "data": {"kind": "text-first"}},
+    {
+        "vector": [0.0, 1.0],
+        "document": elips.DocumentAttachment(text="beta note"),
+        "chunk": chunk,
+        "lineage": lineage,
+    },
 ])
 ```
 
-### `Vault.seek()`
+Each batch record may include:
 
-```python
-def seek(
-    self,
-    vector: Vector,
-    top: int = 10,
-    where: Filter = Filter(),
-    threshold: Optional[float] = None,
-) -> list[Result]
-```
+- `vector`
+- `text`
+- `data`
+- `id`
+- `document`
+- `chunk`
+- `lineage`
 
-Top-k nearest neighbors sorted ascending by distance. Smaller distance means higher similarity.
+Text-only rows require a native text embedder.
 
-**Parameters:**
+## Query Methods
 
-| Name | Type | Default | Description |
-|---|---|---|---|
-| `vector` | `Vector` | required | The query embedding |
-| `top` | `int` | `10` | Maximum number of results to return |
-| `where` | `Filter` | `Filter()` | Optional metadata filter applied before distance ranking |
-| `threshold` | `float` or `None` | `None` | Optional max distance for range search. Records with distance > threshold are excluded |
+### `seek(vector, top=10, where=Filter(), threshold=None)`
 
-**Returns:** List of `Result` objects sorted by distance (closest first).
+Vector similarity search.
 
-**Raises:**
-- `DimensionMismatch` — query vector dimension does not match the vault
-- `InvalidVector` — query vector contains `NaN` or `Inf`
+### `seek_text(text, top=10, where=Filter(), threshold=None)`
 
-**Examples:**
+Text-first query surface. If a native text embedder is configured, the text is
+embedded and routed through the planner. Otherwise ELIPS falls back to lexical
+overlap scoring over attached documents.
 
-```python
-# Basic search
-hits = docs.seek([1.0, 0.0, 0.0], top=5)
-for r in hits:
-    print(r.id, r.distance, r.data)
+### `seek_hybrid(vector, text, top=10, where=Filter(), threshold=None, lexical_weight=0.25)`
 
-# Filtered search
-f = elips.Filter().field("category").equals("tech")
-hits = docs.seek([1.0, 0.0, 0.0], top=10, where=f)
+Blends vector distance with lexical overlap from attached documents.
 
-# Range search (threshold)
-hits = docs.seek([1.0, 0.0, 0.0], top=100, threshold=0.25)
-```
+### `explain_seek(vector, top=10, where=Filter(), threshold=None, has_text_component=False)`
 
-**Result object:**
+Returns a `QueryPlan` with:
 
-Each `Result` has three accessors:
+- `strategy`
+- `candidate_count`
+- `metadata_accelerated`
+- `gpu_index`
+- `index_type`
 
-| Attribute | Type | Description |
-|---|---|---|
-| `id` | `str` | Record UUIDv7 hex string (36 chars) |
-| `distance` | `float` | Distance from query vector. Smaller = more similar. For `cosine`: 0.0 = identical, 1.0 = orthogonal, 2.0 = opposite |
-| `data` | `dict[str, MetaValue]` | Metadata payload attached to the record |
+## Retrieval And Maintenance
 
-### `Vault.fetch()`
+### `fetch(id)`
 
-```python
-def fetch(self, id: str) -> Optional[dict[str, Any]]
-```
+Returns `None` or a dict containing:
 
-Fetch a record's full data by ID, including its vector.
+- `id`
+- `vector`
+- `data`
+- `document`
+- `chunk`
+- `lineage`
 
-**Parameters:**
+### `scan(where=Filter(), offset=0, limit=-1)`
 
-| Name | Type | Description |
-|---|---|---|
-| `id` | `str` | The record's UUIDv7 hex ID (36 chars) |
+Returns a list of the same record dict shape as `fetch()`.
 
-**Returns:** A dict with keys `"id"`, `"vector"`, and `"data"`, or `None` if the record does not exist.
+### `erase(id)`
 
-**Example:**
+Deletes a record by id. Returns `True` if a record existed.
 
-```python
-record = docs.fetch("018f3c7a-0000-7000-8000-000000000001")
-if record:
-    print(record["id"])       # "018f3c7a-0000-7000-8000-000000000001"
-    print(record["vector"])   # (0.1, 0.2, 0.3)
-    print(record["data"])     # {"title": "Getting Started", "year": 2024}
+### `info()`
 
-missing = docs.fetch("00000000-0000-7000-8000-999999999999")
-print(missing)  # None
-```
+Returns `VaultInfo(count, dimension, metric)`.
 
-### `Vault.erase()`
+### `count()`
 
-```python
-def erase(self, id: str) -> bool
-```
+Convenience wrapper for the number of records in the vault.
 
-Remove a record by ID.
+### `rebuild_index()`
 
-**Parameters:**
+Drops and rebuilds the backing index from the authoritative record store. This
+is the vault-scoped maintenance primitive used by `Database.compact()`.
 
-| Name | Type | Description |
-|---|---|---|
-| `id` | `str` | The record's UUIDv7 hex ID |
+## Result Shape
 
-**Returns:** `True` if the record was found and removed, `False` if it did not exist.
+`seek*()` methods return `Result` objects with:
 
-**Example:**
+- `id`
+- `distance`
+- `data`
+- `document`
+- `chunk`
+- `lineage`
 
-```python
-removed = docs.erase("018f3c7a-0000-7000-8000-000000000001")
-print(removed)  # True
+This means document context and embedding provenance are available directly on
+query hits, not only through `fetch()`.
 
-removed = docs.erase("nonexistent-id-0000000000000001")
-print(removed)  # False
-```
+## Common Errors
 
-### `Vault.scan()`
-
-```python
-def scan(
-    self,
-    where: Filter = Filter(),
-    offset: int = 0,
-    limit: int = -1,
-) -> list[dict[str, Any]]
-```
-
-Iterate records matching a filter in insertion order. No vector search — purely metadata iteration.
-
-**Parameters:**
-
-| Name | Type | Default | Description |
-|---|---|---|---|
-| `where` | `Filter` | `Filter()` | Optional metadata filter |
-| `offset` | `int` | `0` | Number of matching records to skip |
-| `limit` | `int` | `-1` | Maximum records to return. `-1` means all matching records |
-
-**Returns:** List of dicts, each with `"id"` and `"data"` keys.
-
-**Examples:**
-
-```python
-# All records
-rows = docs.scan()
-for row in rows:
-    print(row["id"], row["data"])
-
-# Filtered
-rows = docs.scan(where=elips.Filter().field("year").gte(2023))
-
-# Paginated
-page_1 = docs.scan(offset=0, limit=50)
-page_2 = docs.scan(offset=50, limit=50)
-```
-
-### `Vault.info()`
-
-```python
-def info(self) -> VaultInfo
-```
-
-Return summary statistics for the vault.
-
-**Returns:** A `VaultInfo` with properties:
-
-| Property | Type | Description |
-|---|---|---|
-| `count` | `int` | Number of records in the vault |
-| `dimension` | `int` | Vector dimension of the vault |
-| `metric` | `str` | Similarity metric: `"cosine"`, `"euclidean"`, or `"dot_product"` |
-
-**Example:**
-
-```python
-info = docs.info()
-print(info.count)      # 42
-print(info.dimension)  # 1536
-print(info.metric)     # "cosine"
-```
-
-### `Vault.count()`
-
-```python
-def count(self) -> int
-```
-
-Return the number of records in this vault. Equivalent to `vault.info().count`.
-
-**Example:**
-
-```python
-n = docs.count()
-print(n)  # 42
-```
-
-### `Vault.__repr__()`
-
-```python
-def __repr__(self) -> str
-```
-
-Returns a string like `<Vault name='documents' count=42 dimension=1536>`.
-
-## VaultInfo
-
-```python
-class VaultInfo
-```
-
-Summary statistics for a vault. Obtained via `vault.info()`.
-
-| Property | Type | Description |
-|---|---|---|
-| `count` | `int` | Number of records in the vault |
-| `dimension` | `int` | Vector dimension |
-| `metric` | `str` | Similarity metric string |
-
-## Result
-
-```python
-class Result
-```
-
-A single result from a `seek()` or `query()` call.
-
-| Property | Type | Description |
-|---|---|---|
-| `id` | `str` | Record UUIDv7 hex string |
-| `distance` | `float` | Distance from query vector. Smaller = more similar |
-| `data` | `dict[str, MetaValue]` | Metadata payload |
-
-## TransactionVault
-
-```python
-class TransactionVault
-```
-
-Vault-scoped handle for operations within a transaction. Obtained via `txn.vault(name)`. Only supports `place()` and `erase()` — search operations must go through the regular `Vault`.
-
-### `TransactionVault.place()`
-
-```python
-def place(
-    self,
-    vector: Vector,
-    data: PayloadLike = {},
-    id: Optional[str] = None,
-) -> str
-```
-
-Buffered insert within a transaction. Not visible to reads until the transaction commits.
-
-### `TransactionVault.erase()`
-
-```python
-def erase(self, id: str) -> None
-```
-
-Buffered delete within a transaction. Not applied until the transaction commits.
-
-## Complete Example
-
-```python
-import elips
-
-db = elips.open(":memory:", dimension=3, metric="cosine")
-docs = db.vault("documents")
-
-rid_a = docs.place([1.0, 0.0, 0.0], {"title": "alpha", "year": 2024})
-rid_b = docs.place([0.0, 1.0, 0.0], {"title": "beta", "year": 2019})
-rid_c = docs.place([0.9, 0.1, 0.0], {"title": "gamma", "year": 2023})
-
-print(docs.count())     # 3
-print(docs.name)        # "documents"
-
-info = docs.info()
-print(info.dimension)   # 3
-
-hits = docs.seek([1.0, 0.0, 0.0], top=2)
-print(hits[0].data["title"])  # "alpha"
-print(hits[0].distance)       # 0.0 (identical)
-
-record = docs.fetch(rid_a)
-print(record["vector"])       # (1.0, 0.0, 0.0)
-print(record["data"])         # {"title": "alpha", "year": 2024}
-
-rows = docs.scan(where=elips.Filter().field("year").gte(2023))
-print(len(rows))  # 2
-
-docs.erase(rid_b)
-print(docs.count())  # 2
-```
+- `DimensionMismatch`
+- `InvalidVector`
+- `ConfigError` when `place_document()` is used without a text embedder
+- `StorageError` when mutating a read-only vault
