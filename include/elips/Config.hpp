@@ -2,7 +2,14 @@
 #define ELIPS_CONFIG_HPP
 
 #include <cstdint>
+#include <optional>
+#include <string>
 #include <string_view>
+#include <variant>
+
+#ifdef ELIPS_GPU_ENABLED
+#include "elips/gpu_engine/GpuConfig.hpp"
+#endif
 
 namespace elips {
 
@@ -53,12 +60,22 @@ public:
         durability_ = level;
         return *this;
     }
+#ifdef ELIPS_GPU_ENABLED
+    Config& gpu(gpu::GpuConfig config) noexcept {
+        gpu_ = std::move(config);
+        return *this;
+    }
+#endif
 
     [[nodiscard]] std::uint16_t dimension() const noexcept { return dimension_; }
     [[nodiscard]] Metric metric() const noexcept { return metric_; }
     [[nodiscard]] IndexType index() const noexcept { return index_; }
     [[nodiscard]] const GraphParams& graph_params() const noexcept { return graph_; }
     [[nodiscard]] Durability durability() const noexcept { return durability_; }
+#ifdef ELIPS_GPU_ENABLED
+    [[nodiscard]] const gpu::GpuConfig& gpu() const noexcept { return gpu_; }
+    [[nodiscard]] bool has_gpu() const noexcept { return gpu_.policy != gpu::GpuPolicy::CpuOnly; }
+#endif
 
 private:
     std::uint16_t dimension_{0};
@@ -66,6 +83,9 @@ private:
     IndexType index_{IndexType::graph};
     GraphParams graph_{};
     Durability durability_{Durability::standard};
+#ifdef ELIPS_GPU_ENABLED
+    gpu::GpuConfig gpu_{};
+#endif
 };
 
 }  // namespace elips
