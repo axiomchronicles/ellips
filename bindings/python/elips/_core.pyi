@@ -1,4 +1,5 @@
-from typing import Any, Iterable, Mapping, Sequence, Union
+from typing import Any, Iterable, Mapping, Optional, Sequence, Union
+from enum import IntEnum
 
 # -- Type aliases --------------------------------------------------------------
 
@@ -28,6 +29,57 @@ class StorageError(ElipsError):
 
 class LockConflict(ElipsError):
     """A second writer tried to open a database directory already held."""
+
+class ParseError(ElipsError):
+    """Malformed EQL input."""
+
+# -- Core enums ---------------------------------------------------------------
+
+class Metric(IntEnum):
+    """Similarity metrics supported by ELIPS."""
+    cosine: int
+    euclidean: int
+    dot_product: int
+
+class IndexType(IntEnum):
+    """Index backends."""
+    graph: int
+    exact: int
+
+class Durability(IntEnum):
+    """Durability levels trading write throughput against crash safety."""
+    paranoid: int
+    standard: int
+    relaxed: int
+    ephemeral: int
+
+class Comparator(IntEnum):
+    """Metadata comparison operators."""
+    eq: int
+    ne: int
+    lt: int
+    le: int
+    gt: int
+    ge: int
+
+# -- EQL token types ----------------------------------------------------------
+
+class TokenKind(IntEnum):
+    """EQL token categories."""
+    word: int
+    number: int
+    string: int
+    punct: int
+    end: int
+
+class Token:
+    """A single EQL token produced by the lexer."""
+    kind: TokenKind
+    text: str
+    number: float
+    is_integer: bool
+
+    def __repr__(self) -> str: ...
 
 # -- GraphParams ---------------------------------------------------------------
 
@@ -70,13 +122,201 @@ class Config:
     def durability(self, level: str) -> "Config": ...
 
     @property
-    def dimension_val(self) -> int: ...
+    def dimension_val(self) -> int:
+        """Get the configured dimension."""
     @property
-    def metric_val(self) -> str: ...
+    def metric_val(self) -> str:
+        """Get the metric as a string (legacy alias for metric_enum)."""
     @property
-    def index_val(self) -> str: ...
+    def metric_enum(self) -> Metric:
+        """Get the configured Metric enum value."""
     @property
-    def graph_params_val(self) -> GraphParams: ...
+    def index_val(self) -> str:
+        """Get the index type as a string (legacy alias)."""
+    @property
+    def index_enum(self) -> IndexType:
+        """Get the configured IndexType enum value."""
+    @property
+    def graph_params_val(self) -> GraphParams:
+        """Get the configured graph parameters."""
+    @property
+    def durability_enum(self) -> Durability:
+        """Get the configured Durability enum value."""
+    @property
+    def gpu_val(self) -> Optional["GpuConfig"]:
+        """Get the GPU configuration if set, else None."""
+
+    def __repr__(self) -> str: ...
+
+# -- GPU enums and types ------------------------------------------------------
+
+class GpuPolicy(IntEnum):
+    """GPU usage policy."""
+    auto: int
+    prefer_gpu: int
+    require_gpu: int
+    cpu_only: int
+    specific: int
+
+class IndexBuildMode(IntEnum):
+    """GPU index build vs. serve mode."""
+    gpu_build_cpu_serve: int
+    gpu_build_gpu_serve: int
+    hybrid: int
+
+class GpuIndexAlgorithm(IntEnum):
+    """GPU index algorithm selection."""
+    auto: int
+    cagra: int
+    ivf_flat: int
+    ivf_pq: int
+    brute_force: int
+
+class GpuPrecision(IntEnum):
+    """GPU computation precision."""
+    fp32: int
+    fp16: int
+    int8: int
+    auto: int
+
+class GpuError(IntEnum):
+    """GPU error codes."""
+    device_not_found: int
+    insufficient_memory: int
+    kernel_launch_failed: int
+    transfer_failed: int
+    index_build_failed: int
+    unsupported_metric: int
+    initialization_failed: int
+    backend_unavailable: int
+
+class GraphBuildAlgo(IntEnum):
+    """Graph index build algorithm."""
+    ivf_pq: int
+    nn_descent: int
+    iterative_search: int
+
+class GraphIndexBuildParams:
+    """Parameters for GPU graph index construction."""
+    intermediate_graph_degree: int
+    graph_degree: int
+    build_algo: GraphBuildAlgo
+    nn_descent_iterations: int
+    compression_ratio: float
+
+    def __init__(self) -> None: ...
+    def __repr__(self) -> str: ...
+
+class IvfPqBuildParams:
+    """Parameters for IVF-PQ index construction."""
+    n_lists: int
+    pq_dim: int
+    pq_bits: int
+    add_data_on_build: bool
+    kmeans_n_iters: int
+    kmeans_trainset_fraction: float
+
+    def __init__(self) -> None: ...
+    def __repr__(self) -> str: ...
+
+class GpuIndexBuildParams:
+    """GPU index build parameter variant."""
+    params: Union[GraphIndexBuildParams, IvfPqBuildParams]
+
+    def __init__(self) -> None: ...
+    def __repr__(self) -> str: ...
+
+class KernelTiming:
+    """Recorded GPU kernel timing."""
+    kernel_name: str
+    work_items: int
+
+    @property
+    def duration_us(self) -> int:
+        """Duration in microseconds."""
+
+    def __repr__(self) -> str: ...
+
+class GpuConfig:
+    """GPU acceleration configuration."""
+
+    def __init__(self) -> None: ...
+
+    policy: GpuPolicy
+    preferred_backend: str
+    device_index: int
+    build_mode: IndexBuildMode
+    algorithm: GpuIndexAlgorithm
+    device_memory_pool_mb: int
+    fp16_search: bool
+    unified_memory: bool
+    batch_window_us: int
+    max_batch_size: int
+    ef_search: int
+    precision: GpuPrecision
+    profiling: bool
+    graph_params: GraphIndexBuildParams
+    ivf_pq_params: IvfPqBuildParams
+
+    def __repr__(self) -> str: ...
+
+class GpuDeviceInfo:
+    """Information about a detected GPU device."""
+
+    def __init__(self) -> None: ...
+
+    name: str
+    vendor: str
+    backend: str
+    device_index: int
+    total_memory_bytes: int
+    free_memory_bytes: int
+    has_unified_memory: bool
+    supports_fp16: bool
+    supports_bf16: bool
+    supports_int8: bool
+    supports_cagra: bool
+    supports_ivf_pq: bool
+    supports_dynamic_batching: bool
+    supports_half_precision_search: bool
+    compute_capability_major: int
+    compute_capability_minor: int
+    max_threads_per_block: int
+    multiprocessor_count: int
+    shared_memory_per_block_bytes: int
+    l2_cache_bytes: int
+    peak_tflops_fp32: float
+    peak_tflops_fp16: float
+    host_to_device_bandwidth_gb_s: float
+    device_to_host_bandwidth_gb_s: float
+
+    @property
+    def memory_gb(self) -> float:
+        """Total device memory in gigabytes."""
+
+    def __repr__(self) -> str: ...
+
+class GpuMetricsSnapshot:
+    """Snapshot of GPU runtime metrics."""
+
+    def __init__(self) -> None: ...
+
+    backend: str
+    device_name: str
+    device_memory_used_bytes: int
+    device_memory_total_bytes: int
+    index_build_count: int
+    index_build_time_total_ms: int
+    index_build_speedup_vs_cpu_avg: float
+    search_kernel_launches_total: int
+    search_p50_latency_us: int
+    search_p99_latency_us: int
+    batch_avg_size: float
+    batch_coalescing_ratio: float
+    fp16_search_enabled: bool
+    fallback_events_total: int
+    kernel_errors_total: int
+    pinned_memory_pool_used_bytes: int
 
     def __repr__(self) -> str: ...
 
@@ -167,7 +407,7 @@ class TransactionVault:
         self,
         vector: Vector,
         data: PayloadLike = ...,
-        id: str | None = ...,
+        id: Optional[str] = ...,
     ) -> str: ...
     def erase(self, id: str) -> None: ...
 
@@ -212,7 +452,7 @@ class Vault:
         self,
         vector: Vector,
         data: PayloadLike = ...,
-        id: str | None = ...,
+        id: Optional[str] = ...,
     ) -> str:
         """Ingest a single record. Returns the assigned UUIDv7 id.
 
@@ -245,7 +485,7 @@ class Vault:
         vector: Vector,
         top: int = ...,
         where: Filter = ...,
-        threshold: float | None = ...,
+        threshold: Optional[float] = ...,
     ) -> list[Result]:
         """Top-k nearest neighbors sorted ascending by distance.
 
@@ -259,7 +499,7 @@ class Vault:
             List of Result objects sorted by distance (closest first).
         """
 
-    def fetch(self, id: str) -> dict[str, Any] | None:
+    def fetch(self, id: str) -> Optional[dict[str, Any]]:
         """Fetch a record's full data by ID.
 
         Returns:
@@ -341,15 +581,91 @@ class Database:
             List of Result objects.
         """
 
+    def gpu_info(self) -> "GpuDeviceInfo":
+        """Return information about the detected GPU device."""
+
+    def gpu_stats(self) -> "GpuMetricsSnapshot":
+        """Return a snapshot of GPU runtime metrics."""
+
     @property
     def config(self) -> Config:
         """The effective configuration of this database."""
 
     def __enter__(self) -> "Database": ...
-    def __exit__(self, *args: object) -> None: ...
+    def __exit__(self, *args: Any) -> None: ...
     def __repr__(self) -> str: ...
 
-# -- Module-level functions ---------------------------------------------------
+# -- Module-level utility functions -------------------------------------------
+
+def distance(metric: Union[str, Metric], a: Vector, b: Vector) -> float:
+    """Compute the ordering-normalized distance between two vectors.
+
+    Args:
+        metric: One of ``"cosine"``, ``"euclidean"``, ``"dot_product"``, or a Metric enum value.
+        a: First vector.
+        b: Second vector.
+
+    Returns:
+        The distance: smaller = more similar for all metrics.
+    """
+
+def requires_normalization(metric: Union[str, Metric]) -> bool:
+    """Return True if vectors should be L2-normalized for this metric.
+
+    Args:
+        metric: One of ``"cosine"``, ``"euclidean"``, ``"dot_product"``, or a Metric enum value.
+
+    Returns:
+        True only for cosine metric.
+    """
+
+def metric_to_string(metric: Metric) -> str:
+    """Convert a Metric enum value to its string name.
+
+    Args:
+        metric: A Metric enum value.
+
+    Returns:
+        One of ``"cosine"``, ``"euclidean"``, ``"dot_product"``.
+    """
+
+def metric_from_string(name: str) -> Metric:
+    """Parse a string into a Metric enum value.
+
+    Args:
+        name: One of ``"cosine"``, ``"euclidean"``, ``"dot_product"``.
+
+    Returns:
+        The corresponding Metric enum value.
+
+    Raises:
+        ValueError: If the name is not a recognized metric.
+    """
+
+def validate_eql(source: str) -> None:
+    """Validate an EQL statement string without executing it.
+
+    Args:
+        source: EQL source string.
+
+    Returns:
+        None if the statement is syntactically valid.
+
+    Raises:
+        ParseError: On invalid EQL syntax.
+    """
+
+def tokenize_eql(source: str) -> list[Token]:
+    """Tokenize an EQL source string.
+
+    Args:
+        source: EQL source string.
+
+    Returns:
+        A list of Token objects.
+    """
+
+# -- Module-level factory functions -------------------------------------------
 
 def open(
     path: str,
