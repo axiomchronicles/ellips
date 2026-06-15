@@ -18,10 +18,15 @@
 #include "elips/kernel/LockManager.hpp"
 #include "elips/metadata/Filter.hpp"
 
+#ifdef ELIPS_GPU_ENABLED
+#include "elips/gpu_engine/GpuDeviceInfo.hpp"
+#include "elips/gpu_engine/GpuMetricsSnapshot.hpp"
+#endif
+
 namespace elips {
 
-class WAL;          // storage layer (kept out of the public API surface)
-class Transaction;  // defined below
+class WAL;
+class Transaction;
 
 // Summary statistics for a vault.
 struct VaultInfo {
@@ -36,20 +41,14 @@ class Vault {
 public:
     Vault(std::string name, const Config& config);
 
-    // Ingests one record: validates, normalizes (cosine), stores, indexes.
-    // Returns the assigned id (UUIDv7 if none supplied).
     RecordID place(const Vector& vector, Payload payload = {},
                    std::optional<RecordID> id = std::nullopt);
     void place_many(const std::vector<Record>& records);
 
-    // Top-k nearest neighbors, ascending by distance. An optional metadata
-    // filter and distance threshold narrow the result (range search = large
-    // top + threshold).
     [[nodiscard]] std::vector<SearchResult> seek(
         const Vector& query, std::size_t top, const Filter& filter = Filter{},
         std::optional<float> threshold = std::nullopt) const;
 
-    // Iterate records matching a filter in insertion (UUIDv7) order.
     [[nodiscard]] std::vector<Record> scan(
         const Filter& filter = Filter{}, std::size_t offset = 0,
         std::size_t limit = std::numeric_limits<std::size_t>::max()) const;
@@ -60,7 +59,6 @@ public:
     [[nodiscard]] VaultInfo info() const noexcept;
     [[nodiscard]] const std::string& name() const noexcept { return name_; }
 
-    // Used by the persistence layer.
     [[nodiscard]] const std::map<RecordID, Record>& records() const noexcept {
         return records_;
     }
@@ -72,8 +70,8 @@ private:
     std::string name_;
     Config config_;
     std::unique_ptr<IndexPort> index_;
-    std::map<RecordID, Record> records_;  // ordered by UUIDv7 (≈ insertion time)
-    WAL* wal_{nullptr};                    // non-owning; nullptr when in-memory
+    std::map<RecordID, Record> records_;
+    WAL* wal_{nullptr};
 };
 
 // Top-level database handle. One per directory. Owns all vaults and persistence.
@@ -89,32 +87,29 @@ public:
     ElipsInstance(ElipsInstance&&) = delete;
     ElipsInstance& operator=(ElipsInstance&&) = delete;
 
-    // Access or lazily create a vault.
     Vault& vault(const std::string& name);
     [[nodiscard]] std::vector<std::string> list_vaults() const;
 
-    // Begin an atomic write transaction over this database.
     [[nodiscard]] Transaction begin_transaction();
 
-    // Execute a single EQL statement. Query vectors referenced as $name in the
-    // statement are supplied through `bindings`.
     [[nodiscard]] std::vector<SearchResult> query(
         const std::string& eql,
         const std::map<std::string, Vector>& bindings = {});
 
-    // Flush all state to disk (no-op for in-memory databases).
     void checkpoint();
     void close();
-
-    // Drop the handle without checkpointing, leaving only the WAL on disk.
-    // Models an abrupt process exit; the next open() recovers via WAL replay.
     void abandon() noexcept { closed_ = true; }
 
     [[nodiscard]] const Config& config() const noexcept { return config_; }
 
-    // Used by the persistence layer to rehydrate a vault on open.
+#ifdef ELIPS_GPU_ENABLED
+    [[nodiscard]] gpu::GpuDeviceInfo gpu_info() const;
+    [[nodiscard]] gpu::GpuMetricsSnapshot gpu_stats() const;
+    void set_gpu_available(bool available) noexcept { gpu_available_ = available; }
+    void set_gpu_info(gpu::GpuDeviceInfo info) noexcept { gpu_info_ = info; }
+#endif
+
     Vault& adopt_vault(std::unique_ptr<Vault> vault);
-    // Hands the live WAL to the instance and wires every vault to it.
     void attach_wal(std::unique_ptr<WAL> wal);
 
 private:
@@ -125,18 +120,18 @@ private:
     std::optional<LockManager> lock_;
     std::unique_ptr<WAL> wal_;
     std::map<std::string, std::unique_ptr<Vault>> vaults_;
+#ifdef ELIPS_GPU_ENABLED
+    gpu::GpuDeviceInfo gpu_info_;
+    gpu::GpuMetricsSnapshot gpu_stats_;
+    bool gpu_available_{false};
+#endif
 };
 
-// Open (or create) a database. Use ":memory:" for an ephemeral, non-persistent
-// database. For a new on-disk database, config.dimension() must be > 0; on
-// reopen the persisted dimension/metric are authoritative and a conflicting
-// config throws ConfigError.
 [[nodiscard]] std::unique_ptr<ElipsInstance> open(const std::string& path,
                                                   const Config& config = {});
 
 class Transaction;
 
-// Vault-scoped handle used inside a transaction; buffers writes into the txn.
 class TransactionVault {
 public:
     RecordID place(const Vector& vector, Payload payload = {},
@@ -151,9 +146,6 @@ private:
     std::string vault_;
 };
 
-// Atomic, all-or-nothing batch of writes. Operations are buffered and applied
-// only on commit(); an un-committed transaction is rolled back on destruction.
-// Inputs are validated at buffer time so commit() cannot partially apply.
 class Transaction {
 public:
     explicit Transaction(ElipsInstance& db) : db_(&db) {}
