@@ -21,6 +21,7 @@ from ._core import (
     InvalidVector,
     LockConflict,
     NotFound,
+    ParseError,
     StorageError,
 )
 
@@ -31,5 +32,6 @@ __all__ = [
     "InvalidVector",
     "LockConflict",
     "NotFound",
+    "ParseError",
     "StorageError",
 ]
