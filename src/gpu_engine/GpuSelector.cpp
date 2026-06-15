@@ -1,6 +1,8 @@
 #include "elips/gpu_engine/GpuSelector.hpp"
 #include "elips/gpu_engine/GpuDeviceManager.hpp"
 
+#include <algorithm>
+
 namespace elips::gpu {
 
 int GpuSelector::rank_backend(std::string_view backend) const noexcept {
@@ -22,19 +24,44 @@ GpuSelector::select(const GpuConfig& config,
         return std::nullopt;
     }
 
-    const GpuDeviceInfo& best = devices.front();
-
-    if (config.policy == GpuPolicy::Specific && !config.preferred_backend.empty()) {
-        for (const auto& dev : devices) {
-            if (dev.backend == config.preferred_backend) {
-                const_cast<GpuDeviceInfo&>(best) = dev;
-                break;
-            }
+    std::vector<GpuDeviceInfo> ordered = devices;
+    if (config.policy == GpuPolicy::Specific) {
+        ordered.erase(
+            std::remove_if(ordered.begin(), ordered.end(),
+                           [&](const GpuDeviceInfo& dev) {
+                               if (!config.preferred_backend.empty() &&
+                                   dev.backend != config.preferred_backend) {
+                                   return true;
+                               }
+                               if (config.device_index >= 0 &&
+                                   dev.device_index !=
+                                       static_cast<uint32_t>(config.device_index)) {
+                                   return true;
+                               }
+                               return false;
+                           }),
+            ordered.end());
+        if (ordered.empty()) {
+            return std::nullopt;
         }
     }
 
+    std::stable_sort(
+        ordered.begin(), ordered.end(),
+        [&](const GpuDeviceInfo& a, const GpuDeviceInfo& b) {
+            const int rank_a = rank_backend(a.backend);
+            const int rank_b = rank_backend(b.backend);
+            if (rank_a != rank_b) {
+                return rank_a > rank_b;
+            }
+            if (a.supports_cagra != b.supports_cagra) {
+                return a.supports_cagra > b.supports_cagra;
+            }
+            return a.total_device_memory_bytes > b.total_device_memory_bytes;
+        });
+
     GpuDeviceManager manager;
-    return manager.select(config, devices);
+    return manager.select(config, ordered);
 }
 
 } // namespace elips::gpu

@@ -19,7 +19,7 @@ namespace elips {
 // records are detected via CRC32C and cleanly dropped (no partial apply).
 class WAL {
 public:
-    enum class Op : std::uint8_t { insert = 1, erase = 3 };
+    enum class Op : std::uint8_t { insert = 1, erase = 3, insert_ex = 4 };
 
     struct Entry {
         Op op{Op::insert};
@@ -27,12 +27,18 @@ public:
         RecordID id;
         std::vector<float> vector;  // empty for erase
         Payload payload;
+        std::optional<DocumentAttachment> document;
+        std::optional<ChunkInfo> chunk;
+        std::optional<EmbeddingLineage> lineage;
     };
 
     explicit WAL(std::filesystem::path path, bool sync_each_write = true);
 
     void append_insert(const std::string& vault, const RecordID& id,
-                       std::span<const float> vector, const Payload& payload);
+                       std::span<const float> vector, const Payload& payload,
+                       const std::optional<DocumentAttachment>& document = std::nullopt,
+                       const std::optional<ChunkInfo>& chunk = std::nullopt,
+                       const std::optional<EmbeddingLineage>& lineage = std::nullopt);
     void append_erase(const std::string& vault, const RecordID& id);
 
     // Truncate the log (called after a checkpoint has durably captured state).

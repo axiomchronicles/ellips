@@ -17,10 +17,12 @@
 #include "elips/index_engine/IndexPort.hpp"
 #include "elips/kernel/LockManager.hpp"
 #include "elips/metadata/Filter.hpp"
+#include "elips/metadata/MetadataIndex.hpp"
 
 #ifdef ELIPS_GPU_ENABLED
 #include "elips/gpu_engine/GpuDeviceInfo.hpp"
 #include "elips/gpu_engine/GpuMetricsSnapshot.hpp"
+#include "elips/gpu_engine/GpuPort.hpp"
 #endif
 
 namespace elips {
@@ -35,19 +37,59 @@ struct VaultInfo {
     Metric metric{Metric::cosine};
 };
 
+enum class QueryStrategy {
+    ann_index,
+    exact_candidates,
+    full_scan,
+    text_probe,
+    hybrid_fusion,
+};
+
+struct QueryPlan {
+    QueryStrategy strategy{QueryStrategy::ann_index};
+    std::size_t candidate_count{0};
+    bool metadata_accelerated{false};
+    bool gpu_index{false};
+    std::string index_type;
+};
+
 // A named partition of records within a database. Owns its index and the
 // authoritative record store used to hydrate search results.
 class Vault {
 public:
-    Vault(std::string name, const Config& config);
+    Vault(std::string name, const Config& config
+#ifdef ELIPS_GPU_ENABLED
+          , gpu::GpuPort* gpu_backend = nullptr
+#endif
+    );
 
     RecordID place(const Vector& vector, Payload payload = {},
-                   std::optional<RecordID> id = std::nullopt);
+                   std::optional<RecordID> id = std::nullopt,
+                   std::optional<DocumentAttachment> document = std::nullopt,
+                   std::optional<ChunkInfo> chunk = std::nullopt,
+                   std::optional<EmbeddingLineage> lineage = std::nullopt);
+    RecordID place_document(
+        std::string text, Payload payload = {},
+        std::optional<RecordID> id = std::nullopt,
+        std::optional<ChunkInfo> chunk = std::nullopt,
+        std::optional<EmbeddingLineage> lineage = std::nullopt);
     void place_many(const std::vector<Record>& records);
 
     [[nodiscard]] std::vector<SearchResult> seek(
         const Vector& query, std::size_t top, const Filter& filter = Filter{},
         std::optional<float> threshold = std::nullopt) const;
+    [[nodiscard]] std::vector<SearchResult> seek_text(
+        std::string_view text, std::size_t top, const Filter& filter = Filter{},
+        std::optional<float> threshold = std::nullopt) const;
+    [[nodiscard]] std::vector<SearchResult> seek_hybrid(
+        const Vector& query, std::string_view text, std::size_t top,
+        const Filter& filter = Filter{},
+        std::optional<float> threshold = std::nullopt,
+        float lexical_weight = 0.25F) const;
+    [[nodiscard]] QueryPlan explain_seek(
+        const Vector& query, std::size_t top, const Filter& filter = Filter{},
+        std::optional<float> threshold = std::nullopt,
+        bool has_text_component = false) const;
 
     [[nodiscard]] std::vector<Record> scan(
         const Filter& filter = Filter{}, std::size_t offset = 0,
@@ -63,15 +105,30 @@ public:
         return records_;
     }
     void set_wal(WAL* wal) noexcept { wal_ = wal; }
+    void set_read_only(bool read_only) noexcept { read_only_ = read_only; }
+    void rebuild_index();
 
 private:
+    [[nodiscard]] QueryPlan plan_seek(
+        const Vector& prepared, std::size_t top, const Filter& filter,
+        std::optional<float> threshold, bool has_text_component) const;
     [[nodiscard]] Vector prepare(const Vector& vector) const;
+    [[nodiscard]] std::vector<SearchResult> search_records(
+        const Vector& prepared, std::size_t top, const Filter& filter,
+        std::optional<float> threshold,
+        const std::vector<const Record*>* subset = nullptr) const;
+    void ensure_writable() const;
 
     std::string name_;
     Config config_;
     std::unique_ptr<IndexPort> index_;
     std::map<RecordID, Record> records_;
+    MetadataIndex metadata_index_;
     WAL* wal_{nullptr};
+    bool read_only_{false};
+#ifdef ELIPS_GPU_ENABLED
+    gpu::GpuPort* gpu_backend_{nullptr};
+#endif
 };
 
 // Top-level database handle. One per directory. Owns all vaults and persistence.
@@ -97,6 +154,7 @@ public:
         const std::map<std::string, Vector>& bindings = {});
 
     void checkpoint();
+    void compact();
     void close();
     void abandon() noexcept { closed_ = true; }
 
@@ -107,6 +165,9 @@ public:
     [[nodiscard]] gpu::GpuMetricsSnapshot gpu_stats() const;
     void set_gpu_available(bool available) noexcept { gpu_available_ = available; }
     void set_gpu_info(gpu::GpuDeviceInfo info) noexcept { gpu_info_ = info; }
+    void set_gpu_backend(std::unique_ptr<gpu::GpuPort> backend) noexcept {
+        gpu_backend_ = std::move(backend);
+    }
 #endif
 
     Vault& adopt_vault(std::unique_ptr<Vault> vault);
@@ -124,6 +185,7 @@ private:
     gpu::GpuDeviceInfo gpu_info_;
     gpu::GpuMetricsSnapshot gpu_stats_;
     bool gpu_available_{false};
+    std::unique_ptr<gpu::GpuPort> gpu_backend_;
 #endif
 };
 

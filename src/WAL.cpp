@@ -16,17 +16,25 @@ constexpr std::uint32_t wal_magic = 0xE1105E01U;
 std::string encode_body(const WAL::Entry& entry) {
     std::ostringstream body(std::ios::binary);
     detail::put<std::uint32_t>(body, wal_magic);
-    detail::put<std::uint8_t>(body, static_cast<std::uint8_t>(entry.op));
+    const bool has_extras = entry.document.has_value() || entry.chunk.has_value() ||
+                            entry.lineage.has_value();
+    const auto op = has_extras ? WAL::Op::insert_ex : entry.op;
+    detail::put<std::uint8_t>(body, static_cast<std::uint8_t>(op));
     detail::put_string(body, entry.vault);
     body.write(reinterpret_cast<const char*>(entry.id.bytes().data()),
                static_cast<std::streamsize>(entry.id.bytes().size()));
-    if (entry.op == WAL::Op::insert) {
+    if (op == WAL::Op::insert || op == WAL::Op::insert_ex) {
         detail::put<std::uint16_t>(
             body, static_cast<std::uint16_t>(entry.vector.size()));
         body.write(reinterpret_cast<const char*>(entry.vector.data()),
                    static_cast<std::streamsize>(entry.vector.size() *
                                                 sizeof(float)));
         detail::put_payload(body, entry.payload);
+        if (op == WAL::Op::insert_ex) {
+            detail::put_document_attachment(body, entry.document);
+            detail::put_chunk_info(body, entry.chunk);
+            detail::put_embedding_lineage(body, entry.lineage);
+        }
     }
     return body.str();
 }
@@ -55,9 +63,13 @@ void WAL::append(const Entry& entry) {
 }
 
 void WAL::append_insert(const std::string& vault, const RecordID& id,
-                        std::span<const float> vector, const Payload& payload) {
+                        std::span<const float> vector, const Payload& payload,
+                        const std::optional<DocumentAttachment>& document,
+                        const std::optional<ChunkInfo>& chunk,
+                        const std::optional<EmbeddingLineage>& lineage) {
     append(Entry{Op::insert, vault, id,
-                 std::vector<float>(vector.begin(), vector.end()), payload});
+                 std::vector<float>(vector.begin(), vector.end()), payload,
+                 document, chunk, lineage});
 }
 
 void WAL::append_erase(const std::string& vault, const RecordID& id) {
@@ -112,12 +124,17 @@ std::vector<WAL::Entry> WAL::replay(const std::filesystem::path& path) {
         body.read(reinterpret_cast<char*>(id_bytes.data()),
                   static_cast<std::streamsize>(id_bytes.size()));
         entry.id = RecordID{id_bytes};
-        if (op == Op::insert) {
+        if (op == Op::insert || op == Op::insert_ex) {
             const auto dim = detail::get<std::uint16_t>(body);
             entry.vector.resize(dim);
             body.read(reinterpret_cast<char*>(entry.vector.data()),
                       static_cast<std::streamsize>(dim) * sizeof(float));
             entry.payload = detail::get_payload(body);
+            if (op == Op::insert_ex) {
+                entry.document = detail::get_document_attachment(body);
+                entry.chunk = detail::get_chunk_info(body);
+                entry.lineage = detail::get_embedding_lineage(body);
+            }
         }
         if (!body) {
             break;  // truncated record

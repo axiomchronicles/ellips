@@ -13,12 +13,15 @@ public:
     using ElipsError::ElipsError;
 };
 
+enum class LockMode { exclusive, shared };
+
 // RAII advisory file lock enforcing the single-writer / multi-reader contract
 // across processes sharing a database directory. Uses flock() on POSIX. The
 // lock is held for the lifetime of the object and released on destruction.
 class LockManager {
 public:
-    explicit LockManager(const std::string& lock_path);  // acquires exclusive
+    explicit LockManager(const std::string& lock_path,
+                         LockMode mode = LockMode::exclusive);
     ~LockManager();
 
     LockManager(const LockManager&) = delete;
@@ -28,6 +31,7 @@ public:
 
 private:
     int fd_{-1};
+    LockMode mode_{LockMode::exclusive};
 };
 
 }  // namespace elips

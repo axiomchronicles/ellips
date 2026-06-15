@@ -59,6 +59,9 @@ void GpuMemoryPool::release(GpuBuffer&& buf) noexcept {
             return;
         }
     }
+    if (buf.backend_handle()) {
+        backend_.free_device(std::move(buf));
+    }
 }
 
 size_t GpuMemoryPool::available() const noexcept {

@@ -66,6 +66,11 @@ void apply_projection(std::vector<SearchResult>& results,
     }
 }
 
+SearchResult make_result(const Record& record, float distance) {
+    return SearchResult{record.id, distance, record.payload, record.document,
+                        record.chunk, record.lineage};
+}
+
 struct Executor {
     ElipsInstance& db;
     const std::map<std::string, Vector>& bindings;
@@ -101,7 +106,7 @@ struct Executor {
         if (!record) {
             return {};
         }
-        return {SearchResult{record->id, 0.0F, record->payload}};
+        return {make_result(*record, 0.0F)};
     }
 
     std::vector<SearchResult> operator()(const ScanStatement& s) const {
@@ -114,7 +119,7 @@ struct Executor {
         std::vector<SearchResult> results;
         results.reserve(records.size());
         for (const auto& record : records) {
-            results.push_back(SearchResult{record.id, 0.0F, record.payload});
+            results.push_back(make_result(record, 0.0F));
         }
         return results;
     }
@@ -122,7 +127,8 @@ struct Executor {
     std::vector<SearchResult> operator()(const InsertStatement& s) const {
         const RecordID id =
             db.vault(s.vault).place(Vector{s.vector}, s.data);
-        return {SearchResult{id, 0.0F, {}}};
+        return {SearchResult{id, 0.0F, {}, std::nullopt, std::nullopt,
+                             std::nullopt}};
     }
 
     std::vector<SearchResult> operator()(const DeleteStatement& s) const {

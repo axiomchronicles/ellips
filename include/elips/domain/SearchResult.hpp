@@ -12,6 +12,9 @@ struct SearchResult {
     RecordID id;
     float distance{0.0F};
     Payload data;
+    std::optional<DocumentAttachment> document;
+    std::optional<ChunkInfo> chunk;
+    std::optional<EmbeddingLineage> lineage;
 };
 
 }  // namespace elips

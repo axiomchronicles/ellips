@@ -15,6 +15,7 @@ class GpuGraphIndex final : public GpuIndexPort {
 public:
     GpuGraphIndex(GpuPort& backend, elips::Metric metric, uint16_t dimension,
                   const GpuConfig& config);
+    ~GpuGraphIndex() override;
 
     void insert(const RecordID& id, std::span<const float> vector) override;
     void remove(const RecordID& id) override;
@@ -40,6 +41,8 @@ public:
     [[nodiscard]] std::string_view backend_name() const noexcept override;
 
 private:
+    void release_graph_data() noexcept;
+
     GpuPort& backend_;
     elips::Metric metric_;
     uint16_t dimension_;

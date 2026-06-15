@@ -189,4 +189,45 @@ bool Filter::matches(const Payload& payload) const {
     return root_ == nullptr || eval_node(*root_, payload);
 }
 
+std::optional<std::vector<Filter::ExactConstraint>> Filter::exact_constraints() const {
+    if (root_ == nullptr) {
+        return std::vector<ExactConstraint>{};
+    }
+
+    const auto walk = [&](const auto& self, const std::shared_ptr<const Node>& node)
+        -> std::optional<std::vector<ExactConstraint>> {
+        if (node == nullptr) {
+            return std::vector<ExactConstraint>{};
+        }
+        switch (node->kind) {
+            case Kind::cmp:
+                if (node->cmp != Comparator::eq) {
+                    return std::nullopt;
+                }
+                return std::vector<ExactConstraint>{
+                    ExactConstraint{node->field, {node->value}}};
+            case Kind::in:
+                return std::vector<ExactConstraint>{
+                    ExactConstraint{node->field, node->set}};
+            case Kind::conj: {
+                auto left = self(self, node->a);
+                auto right = self(self, node->b);
+                if (!left.has_value() || !right.has_value()) {
+                    return std::nullopt;
+                }
+                left->insert(left->end(), right->begin(), right->end());
+                return left;
+            }
+            case Kind::contains:
+            case Kind::disj:
+            case Kind::neg:
+            case Kind::none:
+                return std::nullopt;
+        }
+        return std::nullopt;
+    };
+
+    return walk(walk, root_);
+}
+
 }  // namespace elips

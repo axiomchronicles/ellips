@@ -86,6 +86,75 @@ inline Payload get_payload(std::istream& in) {
     return payload;
 }
 
+inline void put_document_attachment(
+    std::ostream& out, const std::optional<DocumentAttachment>& document) {
+    put<std::uint8_t>(out, document.has_value() ? 1U : 0U);
+    if (!document.has_value()) {
+        return;
+    }
+    put_string(out, document->text);
+    put_string(out, document->uri);
+    put_string(out, document->mime_type);
+}
+
+inline std::optional<DocumentAttachment> get_document_attachment(std::istream& in) {
+    if (get<std::uint8_t>(in) == 0U) {
+        return std::nullopt;
+    }
+    return DocumentAttachment{
+        .text = get_string(in),
+        .uri = get_string(in),
+        .mime_type = get_string(in),
+    };
+}
+
+inline void put_chunk_info(std::ostream& out, const std::optional<ChunkInfo>& chunk) {
+    put<std::uint8_t>(out, chunk.has_value() ? 1U : 0U);
+    if (!chunk.has_value()) {
+        return;
+    }
+    put_string(out, chunk->document_key);
+    put<std::uint32_t>(out, chunk->ordinal);
+    put<std::uint32_t>(out, chunk->char_start);
+    put<std::uint32_t>(out, chunk->char_end);
+}
+
+inline std::optional<ChunkInfo> get_chunk_info(std::istream& in) {
+    if (get<std::uint8_t>(in) == 0U) {
+        return std::nullopt;
+    }
+    return ChunkInfo{
+        .document_key = get_string(in),
+        .ordinal = get<std::uint32_t>(in),
+        .char_start = get<std::uint32_t>(in),
+        .char_end = get<std::uint32_t>(in),
+    };
+}
+
+inline void put_embedding_lineage(
+    std::ostream& out, const std::optional<EmbeddingLineage>& lineage) {
+    put<std::uint8_t>(out, lineage.has_value() ? 1U : 0U);
+    if (!lineage.has_value()) {
+        return;
+    }
+    put_string(out, lineage->provider);
+    put_string(out, lineage->model);
+    put_string(out, lineage->revision);
+    put_payload(out, lineage->attributes);
+}
+
+inline std::optional<EmbeddingLineage> get_embedding_lineage(std::istream& in) {
+    if (get<std::uint8_t>(in) == 0U) {
+        return std::nullopt;
+    }
+    return EmbeddingLineage{
+        .provider = get_string(in),
+        .model = get_string(in),
+        .revision = get_string(in),
+        .attributes = get_payload(in),
+    };
+}
+
 // CRC32C (Castagnoli), software table built once. Used for WAL record integrity.
 inline std::uint32_t crc32c(const void* data, std::size_t len) {
     static const auto table = [] {

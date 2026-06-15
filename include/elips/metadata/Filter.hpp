@@ -2,6 +2,7 @@
 #define ELIPS_METADATA_FILTER_HPP
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -21,6 +22,8 @@ enum class Comparator { eq, ne, lt, le, gt, ge };
 //   - leaf factories + combinators (used by the EQL executor)
 class Filter {
 public:
+    using ExactConstraint = std::pair<std::string, std::vector<MetaValue>>;
+
     Filter() = default;
 
     // --- fluent builder (chained predicates are AND-ed) ---
@@ -48,6 +51,8 @@ public:
     [[nodiscard]] static Filter not_(const Filter& inner);
 
     [[nodiscard]] bool matches(const Payload& payload) const;
+    [[nodiscard]] std::optional<std::vector<ExactConstraint>>
+    exact_constraints() const;
     [[nodiscard]] bool matches_all() const noexcept { return root_ == nullptr; }
 
 private:

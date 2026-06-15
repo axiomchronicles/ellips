@@ -13,6 +13,18 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "bindings
 import elips
 
 
+def toy_embed(texts):
+    """Deterministic 2D embedder for modern API tests."""
+    out = []
+    for text in texts:
+        lowered = text.lower()
+        out.append([
+            1.0 if "alpha" in lowered else 0.0,
+            1.0 if "beta" in lowered else 0.0,
+        ])
+    return out
+
+
 def test_exceptions():
     """Verify all 8 exceptions are importable and properly raised."""
     for name in [
@@ -125,6 +137,26 @@ def test_config():
     print("  PASS test_config")
 
 
+def test_config_v2_surface():
+    """Verify v2 configuration options and text embedder wiring."""
+    c = (elips.Config()
+         .dimension(2)
+         .metric("cosine")
+         .index("graph")
+         .access_mode("read_only")
+         .segmented_storage(False)
+         .metadata_acceleration(False)
+         .text_embedder(toy_embed, provider="pytest", model="toy"))
+
+    assert c.access_mode_val == "read_only"
+    assert c.access_mode_enum == elips.AccessMode.read_only
+    assert c.segmented_storage_enabled is False
+    assert c.metadata_acceleration_enabled is False
+    assert c.has_text_embedder is True
+
+    print("  PASS test_config_v2_surface")
+
+
 def test_database_crud():
     """Verify full database CRUD operations."""
     db = elips.open(":memory:", dimension=3, metric="cosine")
@@ -168,6 +200,49 @@ def test_database_crud():
     assert docs.count() == 1
 
     print("  PASS test_database_crud")
+
+
+def test_native_document_query_surface():
+    """Verify native document ingest, lineage, text query, and planner APIs."""
+    config = (elips.Config()
+              .dimension(2)
+              .metric("cosine")
+              .text_embedder(toy_embed, provider="pytest", model="toy"))
+    db = elips.open_with_config(":memory:", config)
+    docs = db.vault("docs")
+
+    chunk = elips.ChunkInfo()
+    chunk.document_key = "doc-alpha"
+    chunk.ordinal = 2
+    chunk.char_start = 4
+    chunk.char_end = 13
+
+    rid = docs.place_document("alpha note", {"kind": "alpha"}, chunk=chunk)
+    fetched = docs.fetch(rid)
+    assert fetched is not None
+    assert fetched["document"].text == "alpha note"
+    assert fetched["chunk"].document_key == "doc-alpha"
+    assert fetched["chunk"].ordinal == 2
+    assert fetched["lineage"].provider == "pytest"
+    assert fetched["lineage"].model == "toy"
+
+    docs.place_document("beta note", {"kind": "beta"})
+
+    hits = docs.seek_text("alpha", top=1)
+    assert len(hits) == 1
+    assert hits[0].id == rid
+    assert hits[0].document.text == "alpha note"
+    assert hits[0].lineage.model == "toy"
+
+    hybrid = docs.seek_hybrid([0.0, 1.0], "alpha", top=2)
+    assert len(hybrid) == 2
+
+    where = elips.Filter().field("kind").equals("alpha")
+    plan = docs.explain_seek([1.0, 0.0], top=1, where=where, has_text_component=True)
+    assert plan.metadata_accelerated is True
+    assert plan.strategy == elips.QueryStrategy.hybrid_fusion
+
+    print("  PASS test_native_document_query_surface")
 
 
 def test_place_many():
@@ -468,6 +543,59 @@ def test_type_stubs():
     print("  PASS test_type_stubs")
 
 
+def test_modern_document_api():
+    """Modern Engine/Arena wrappers support text-first ingestion and querying."""
+    engine = elips.connect(":memory:", dimension=2, metric="cosine", embedder=toy_embed)
+    arena = engine.arena("docs")
+
+    keys = arena.ingest(
+        texts=["alpha note", "beta note"],
+        meta=[{"kind": "alpha"}, {"kind": "beta"}],
+    )
+    assert len(keys) == 2
+    assert arena.count() == 2
+
+    rows = arena.pull(keys, include_vectors=True)
+    assert rows[0].text == "alpha note"
+    assert rows[1].meta["kind"] == "beta"
+    assert len(rows[0].vector) == 2
+
+    hits = arena.probe_text("alpha", top=2, include_vectors=True)
+    assert hits[0].text == "alpha note"
+    assert hits[0].meta["kind"] == "alpha"
+    assert len(hits[0].vector) == 2
+
+    filtered = arena.probe([0.0, 1.0], top=2,
+                           where=elips.Filter().field("kind").equals("beta"))
+    assert len(filtered) == 1
+    assert filtered[0].text == "beta note"
+
+    print("  PASS test_modern_document_api")
+
+
+def test_modern_merge_replaces_existing_key():
+    """Modern merge relies on vault-level replace semantics for repeated IDs."""
+    engine = elips.connect(":memory:", dimension=2, metric="cosine",
+                           index="exact", embedder=toy_embed)
+    arena = engine.arena("docs")
+
+    key = arena.write(vector=[1.0, 0.0], text="alpha old", meta={"rev": 1})
+    arena.merge(vectors=[[0.0, 1.0]], texts=["beta new"], meta=[{"rev": 2}], keys=[key])
+
+    rows = arena.pull([key], include_vectors=True)
+    assert len(rows) == 1
+    assert rows[0].text == "beta new"
+    assert rows[0].meta["rev"] == 2
+    assert arena.count() == 1
+
+    hits = arena.probe([0.0, 1.0], top=5)
+    assert len(hits) == 1
+    assert hits[0].key == key
+    assert hits[0].text == "beta new"
+
+    print("  PASS test_modern_merge_replaces_existing_key")
+
+
 def test_parity_cpp_vs_python():
     """C++ and Python should produce identical results for the same operations."""
     db = elips.open(":memory:", dimension=3, metric="cosine")
@@ -509,6 +637,46 @@ def test_parity_cpp_vs_python():
     print("  PASS test_parity_cpp_vs_python")
 
 
+def test_segmented_persistence_and_read_only_mode():
+    """Persistent v2 storage exposes manifest segments and shared read-only mode."""
+    with tempfile.TemporaryDirectory() as td:
+        db_path = os.path.join(td, "segmented")
+        config = (elips.Config()
+                  .dimension(2)
+                  .metric("cosine")
+                  .segmented_storage(True)
+                  .text_embedder(toy_embed, provider="pytest", model="toy"))
+
+        db = elips.open_with_config(db_path, config)
+        docs = db.vault("docs")
+        docs.place_document("alpha note", {"kind": "alpha"})
+        docs.place_document("beta note", {"kind": "beta"})
+        db.checkpoint()
+        db.compact()
+        db.close()
+
+        assert os.path.exists(os.path.join(db_path, "elips.manifest"))
+        assert os.path.isdir(os.path.join(db_path, "segments"))
+
+        reader_a = elips.open(db_path, access_mode="read_only")
+        reader_b = elips.open(db_path, access_mode="read_only")
+
+        assert reader_a.vault("docs").count() == 2
+        assert reader_b.vault("docs").count() == 2
+        assert reader_b.vault("docs").seek_text("alpha", top=1)[0].data["kind"] == "alpha"
+
+        try:
+            reader_a.vault("docs").place([1.0, 0.0], {"kind": "gamma"})
+            assert False
+        except elips.StorageError:
+            pass
+
+        reader_a.close()
+        reader_b.close()
+
+    print("  PASS test_segmented_persistence_and_read_only_mode")
+
+
 if __name__ == "__main__":
     tests = [
         test_exceptions,
@@ -516,7 +684,9 @@ if __name__ == "__main__":
         test_utilities,
         test_eql_tooling,
         test_config,
+        test_config_v2_surface,
         test_database_crud,
+        test_native_document_query_surface,
         test_place_many,
         test_filtered_search,
         test_transaction,
@@ -528,7 +698,10 @@ if __name__ == "__main__":
         test_edge_cases,
         test_memory_leak_check,
         test_type_stubs,
+        test_modern_document_api,
+        test_modern_merge_replaces_existing_key,
         test_parity_cpp_vs_python,
+        test_segmented_persistence_and_read_only_mode,
     ]
 
     failed = 0

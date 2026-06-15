@@ -121,10 +121,31 @@ GpuDeviceManager::select(const GpuConfig& config,
         return std::nullopt;
     }
 
-    const GpuDeviceInfo& chosen = devices.front();
+    const GpuDeviceInfo* chosen = nullptr;
+    for (const auto& candidate : devices) {
+        if (!config.preferred_backend.empty() &&
+            candidate.backend != config.preferred_backend) {
+            continue;
+        }
+        if (config.device_index >= 0 &&
+            candidate.device_index !=
+                static_cast<uint32_t>(config.device_index)) {
+            continue;
+        }
+        chosen = &candidate;
+        break;
+    }
+
+    if (chosen == nullptr) {
+        if (config.policy == GpuPolicy::RequireGpu ||
+            config.policy == GpuPolicy::Specific) {
+            return std::nullopt;
+        }
+        chosen = &devices.front();
+    }
 
 #if defined(ELIPS_CUDA_ENABLED)
-    if (chosen.backend == "cuda") {
+    if (chosen->backend == "cuda") {
         auto backend = std::make_unique<cuda::CudaBackend>();
         auto result = backend->initialize(config);
         if (result.has_value()) {
@@ -134,7 +155,7 @@ GpuDeviceManager::select(const GpuConfig& config,
 #endif
 
 #if defined(ELIPS_HIP_ENABLED)
-    if (chosen.backend == "hip") {
+    if (chosen->backend == "hip") {
         auto backend = std::make_unique<hip::HipBackend>();
         auto result = backend->initialize(config);
         if (result.has_value()) {
@@ -144,7 +165,7 @@ GpuDeviceManager::select(const GpuConfig& config,
 #endif
 
 #if defined(__APPLE__) && defined(ELIPS_METAL_ENABLED)
-    if (chosen.backend == "metal") {
+    if (chosen->backend == "metal") {
         auto backend = std::make_unique<metal::MetalBackend>();
         auto result = backend->initialize(config);
         if (result.has_value()) {
@@ -154,7 +175,7 @@ GpuDeviceManager::select(const GpuConfig& config,
 #endif
 
 #if defined(ELIPS_SYCL_ENABLED)
-    if (chosen.backend == "sycl") {
+    if (chosen->backend == "sycl") {
         auto backend = std::make_unique<sycl::SyclBackend>();
         auto result = backend->initialize(config);
         if (result.has_value()) {
@@ -164,7 +185,7 @@ GpuDeviceManager::select(const GpuConfig& config,
 #endif
 
 #if defined(ELIPS_VULKAN_ENABLED)
-    if (chosen.backend == "vulkan") {
+    if (chosen->backend == "vulkan") {
         auto backend = std::make_unique<vulkan::VulkanBackend>();
         auto result = backend->initialize(config);
         if (result.has_value()) {

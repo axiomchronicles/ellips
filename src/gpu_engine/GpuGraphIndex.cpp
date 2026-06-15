@@ -7,6 +7,15 @@ GpuGraphIndex::GpuGraphIndex(GpuPort& backend, elips::Metric metric,
                              uint16_t dimension, const GpuConfig& config)
     : backend_(backend), metric_(metric), dimension_(dimension) {}
 
+GpuGraphIndex::~GpuGraphIndex() { release_graph_data(); }
+
+void GpuGraphIndex::release_graph_data() noexcept {
+    if (!graph_data_) {
+        return;
+    }
+    backend_.free_device(std::move(graph_data_));
+}
+
 void GpuGraphIndex::insert(const RecordID& id, std::span<const float> vector) {
     ids_.push_back(id);
     ++count_;
@@ -47,6 +56,7 @@ GpuGraphIndex::build_from_batch(std::span<const float> vectors,
     ids_.assign(ids.begin(), ids.end());
     count_ = ids_.size();
 
+    release_graph_data();
     GpuBuffer db_buf;
     auto alloc = backend_.allocate_device(vectors.size_bytes());
     if (!alloc.has_value()) return std::unexpected(alloc.error());

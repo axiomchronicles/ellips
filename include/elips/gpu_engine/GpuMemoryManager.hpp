@@ -54,6 +54,7 @@ private:
     size_t allocated_{0};
     size_t peak_allocated_{0};
     std::vector<FreeBlock> free_blocks_;
+    std::vector<GpuBuffer> root_allocations_;
     std::vector<void*> pinned_blocks_;
     mutable std::mutex mutex_;
 };

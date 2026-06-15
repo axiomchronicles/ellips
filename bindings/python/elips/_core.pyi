@@ -1,4 +1,4 @@
-from typing import Any, Iterable, Mapping, Optional, Sequence, Union
+from typing import Any, Callable, Iterable, Mapping, Optional, Sequence, Union
 from enum import IntEnum
 
 # -- Type aliases --------------------------------------------------------------
@@ -62,6 +62,19 @@ class Comparator(IntEnum):
     gt: int
     ge: int
 
+class AccessMode(IntEnum):
+    """Database access mode."""
+    read_write: int
+    read_only: int
+
+class QueryStrategy(IntEnum):
+    """Planner strategy chosen for a query."""
+    ann_index: int
+    exact_candidates: int
+    full_scan: int
+    text_probe: int
+    hybrid_fusion: int
+
 # -- EQL token types ----------------------------------------------------------
 
 class TokenKind(IntEnum):
@@ -120,6 +133,15 @@ class Config:
     def index(self, type: str) -> "Config": ...
     def graph_params(self, params: GraphParams) -> "Config": ...
     def durability(self, level: str) -> "Config": ...
+    def access_mode(self, mode: str) -> "Config": ...
+    def segmented_storage(self, enabled: bool) -> "Config": ...
+    def metadata_acceleration(self, enabled: bool) -> "Config": ...
+    def text_embedder(
+        self,
+        embedder: Callable[[Sequence[str]], Sequence[Vector]],
+        provider: str = ...,
+        model: str = ...,
+    ) -> "Config": ...
 
     @property
     def dimension_val(self) -> int:
@@ -142,6 +164,21 @@ class Config:
     @property
     def durability_enum(self) -> Durability:
         """Get the configured Durability enum value."""
+    @property
+    def access_mode_val(self) -> str:
+        """Get the access mode as a string."""
+    @property
+    def access_mode_enum(self) -> AccessMode:
+        """Get the configured AccessMode enum value."""
+    @property
+    def segmented_storage_enabled(self) -> bool:
+        """Return whether segmented storage is enabled."""
+    @property
+    def metadata_acceleration_enabled(self) -> bool:
+        """Return whether metadata acceleration is enabled."""
+    @property
+    def has_text_embedder(self) -> bool:
+        """Return whether a text embedder is configured."""
     @property
     def gpu_val(self) -> Optional["GpuConfig"]:
         """Get the GPU configuration if set, else None."""
@@ -320,6 +357,59 @@ class GpuMetricsSnapshot:
 
     def __repr__(self) -> str: ...
 
+class DocumentAttachment:
+    """Attached source document for a record."""
+
+    def __init__(
+        self,
+        text: str = ...,
+        uri: str = ...,
+        mime_type: str = ...,
+    ) -> None: ...
+
+    text: str
+    uri: str
+    mime_type: str
+
+    def __repr__(self) -> str: ...
+
+class ChunkInfo:
+    """Chunk lineage information for a record."""
+
+    def __init__(self) -> None: ...
+
+    document_key: str
+    ordinal: int
+    char_start: int
+    char_end: int
+
+    def __repr__(self) -> str: ...
+
+class EmbeddingLineage:
+    """Embedding provenance for a record."""
+
+    def __init__(self) -> None: ...
+
+    provider: str
+    model: str
+    revision: str
+    attributes: dict[str, MetaValue]
+
+    def __repr__(self) -> str: ...
+
+class QueryPlan:
+    """Plan selected by the vault query planner."""
+
+    def __init__(self) -> None: ...
+
+    strategy: QueryStrategy
+    candidate_count: int
+    metadata_accelerated: bool
+    gpu_index: bool
+    index_type: str
+
+    def __repr__(self) -> str: ...
+
 # -- VaultInfo ----------------------------------------------------------------
 
 class VaultInfo:
@@ -354,6 +444,10 @@ class Result:
     @property
     def data(self) -> dict[str, MetaValue]:
         """Metadata payload attached to the record."""
+
+    document: Optional[DocumentAttachment]
+    chunk: Optional[ChunkInfo]
+    lineage: Optional[EmbeddingLineage]
 
     def __repr__(self) -> str: ...
 
@@ -453,6 +547,9 @@ class Vault:
         vector: Vector,
         data: PayloadLike = ...,
         id: Optional[str] = ...,
+        document: Optional[DocumentAttachment] = ...,
+        chunk: Optional[ChunkInfo] = ...,
+        lineage: Optional[EmbeddingLineage] = ...,
     ) -> str:
         """Ingest a single record. Returns the assigned UUIDv7 id.
 
@@ -460,18 +557,35 @@ class Vault:
             vector: The embedding vector (list or tuple of floats).
             data: Optional metadata payload (dict of str -> int/float/bool/str).
             id: Optional custom UUIDv7 record ID.
+            document: Optional source document attachment.
+            chunk: Optional chunk lineage.
+            lineage: Optional embedding provenance.
 
         Returns:
             The record's ID as a hex string.
         """
+
+    def place_document(
+        self,
+        text: str,
+        data: PayloadLike = ...,
+        id: Optional[str] = ...,
+        chunk: Optional[ChunkInfo] = ...,
+        lineage: Optional[EmbeddingLineage] = ...,
+    ) -> str:
+        """Embed and ingest a text document using the configured text embedder."""
 
     def place_many(self, records: Iterable[Mapping[str, Any]]) -> None:
         """Batch-ingest records.
 
         Each record is a dict with:
             vector: list[float]    (required)
+            text: str              (optional, requires native text embedder or wrapper embedder)
             data: dict             (optional)
             id: str                (optional)
+            document: DocumentAttachment (optional)
+            chunk: ChunkInfo       (optional)
+            lineage: EmbeddingLineage (optional)
 
         Example:
             vault.place_many([
@@ -498,6 +612,36 @@ class Vault:
         Returns:
             List of Result objects sorted by distance (closest first).
         """
+
+    def seek_text(
+        self,
+        text: str,
+        top: int = ...,
+        where: Filter = ...,
+        threshold: Optional[float] = ...,
+    ) -> list[Result]:
+        """Query using text directly."""
+
+    def seek_hybrid(
+        self,
+        vector: Vector,
+        text: str,
+        top: int = ...,
+        where: Filter = ...,
+        threshold: Optional[float] = ...,
+        lexical_weight: float = ...,
+    ) -> list[Result]:
+        """Blend vector similarity with lexical overlap over attached documents."""
+
+    def explain_seek(
+        self,
+        vector: Vector,
+        top: int = ...,
+        where: Filter = ...,
+        threshold: Optional[float] = ...,
+        has_text_component: bool = ...,
+    ) -> QueryPlan:
+        """Return the planner decision for a query shape."""
 
     def fetch(self, id: str) -> Optional[dict[str, Any]]:
         """Fetch a record's full data by ID.
@@ -533,6 +677,9 @@ class Vault:
     def count(self) -> int:
         """Return the number of records in this vault."""
 
+    def rebuild_index(self) -> None:
+        """Rebuild the backing index from authoritative stored records."""
+
     def __repr__(self) -> str: ...
 
 # -- Database -----------------------------------------------------------------
@@ -558,6 +705,9 @@ class Database:
 
     def checkpoint(self) -> None:
         """Flush all state to disk (no-op for in-memory databases)."""
+
+    def compact(self) -> None:
+        """Compact persistent state and rebuild indexes."""
 
     def close(self) -> None:
         """Checkpoint and release the lock."""
@@ -672,6 +822,7 @@ def open(
     dimension: int = ...,
     metric: str = ...,
     index: str = ...,
+    access_mode: str = ...,
 ) -> Database:
     """Open (or create) a database with simple parameters.
 
@@ -681,6 +832,7 @@ def open(
         metric: Similarity metric (``\"cosine\"``, ``\"euclidean\"``,
             ``\"dot_product\"``).
         index: Index backend (``\"graph\"`` for HNSW, ``\"exact\"`` for brute-force).
+        access_mode: ``\"read_write\"`` or ``\"read_only\"``.
 
     Returns:
         A Database handle.

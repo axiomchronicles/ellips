@@ -41,6 +41,7 @@ add_library(elips_core
     src/LockManager.cpp
     src/WAL.cpp
     src/Filter.cpp
+    src/MetadataIndex.cpp
     src/EQLLexer.cpp
     src/EQLParser.cpp
     src/QueryExecutor.cpp

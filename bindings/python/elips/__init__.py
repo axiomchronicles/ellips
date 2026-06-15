@@ -42,12 +42,16 @@ __version__ = "1.0.0"
 # -- module imports -----------------------------------------------------------
 
 from ._core import (
+    AccessMode,
+    ChunkInfo,
     Comparator,
     Config,
     ConfigError,
     Database,
+    DocumentAttachment,
     DimensionMismatch,
     Durability,
+    EmbeddingLineage,
     ElipsError,
     Filter,
     GraphParams,
@@ -57,6 +61,8 @@ from ._core import (
     Metric,
     NotFound,
     ParseError,
+    QueryPlan,
+    QueryStrategy,
     Result,
     StorageError,
     Token,
@@ -74,6 +80,7 @@ from ._core import (
     requires_normalization,
     tokenize_eql,
 )
+from .modern import Arena, Embedder, Engine, Hit, Row, connect, connect_with_config
 
 try:
     from ._core import (
@@ -92,8 +99,24 @@ try:
         KernelTiming,
     )
     _has_gpu = True
+    _gpu_exports = [
+        "GpuConfig",
+        "GpuDeviceInfo",
+        "GpuError",
+        "GpuIndexAlgorithm",
+        "GpuIndexBuildParams",
+        "GpuMetricsSnapshot",
+        "GpuPolicy",
+        "GpuPrecision",
+        "GraphBuildAlgo",
+        "GraphIndexBuildParams",
+        "IndexBuildMode",
+        "IvfPqBuildParams",
+        "KernelTiming",
+    ]
 except ImportError:
     _has_gpu = False
+    _gpu_exports = []
 
 # -- public API ---------------------------------------------------------------
 
@@ -101,6 +124,8 @@ __all__ = [
     # factory
     "open",
     "open_with_config",
+    "connect",
+    "connect_with_config",
     # core classes
     "Database",
     "Vault",
@@ -111,11 +136,18 @@ __all__ = [
     "GraphParams",
     "Transaction",
     "TransactionVault",
+    "Engine",
+    "Arena",
+    "Row",
+    "Hit",
+    "Embedder",
     # enums
     "Metric",
     "IndexType",
     "Durability",
+    "AccessMode",
     "Comparator",
+    "QueryStrategy",
     # EQL
     "Token",
     "TokenKind",
@@ -126,20 +158,6 @@ __all__ = [
     "requires_normalization",
     "metric_from_string",
     "metric_to_string",
-    # GPU types
-    "GpuConfig",
-    "GpuDeviceInfo",
-    "GpuError",
-    "GpuIndexAlgorithm",
-    "GpuIndexBuildParams",
-    "GpuMetricsSnapshot",
-    "GpuPolicy",
-    "GpuPrecision",
-    "GraphBuildAlgo",
-    "GraphIndexBuildParams",
-    "IndexBuildMode",
-    "IvfPqBuildParams",
-    "KernelTiming",
     # errors
     "ElipsError",
     "DimensionMismatch",
@@ -149,4 +167,11 @@ __all__ = [
     "StorageError",
     "LockConflict",
     "ParseError",
+    # lineage / docs
+    "DocumentAttachment",
+    "ChunkInfo",
+    "EmbeddingLineage",
+    "QueryPlan",
 ]
+
+__all__.extend(_gpu_exports)

@@ -2,10 +2,13 @@
 #define ELIPS_CONFIG_HPP
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <variant>
+
+#include "elips/text_engine/TextEmbedderPort.hpp"
 
 #ifdef ELIPS_GPU_ENABLED
 #include "elips/gpu_engine/GpuConfig.hpp"
@@ -26,6 +29,8 @@ enum class IndexType { graph, exact };
 //   relaxed   - WAL buffered; flushed on checkpoint/close only
 //   ephemeral - no WAL (the in-memory adapter uses this)
 enum class Durability { paranoid, standard, relaxed, ephemeral };
+
+enum class AccessMode { read_write, read_only };
 
 [[nodiscard]] std::string_view to_string(Metric metric) noexcept;
 [[nodiscard]] Metric metric_from_string(std::string_view name);
@@ -60,6 +65,22 @@ public:
         durability_ = level;
         return *this;
     }
+    Config& access_mode(AccessMode mode) noexcept {
+        access_mode_ = mode;
+        return *this;
+    }
+    Config& segmented_storage(bool enabled) noexcept {
+        segmented_storage_ = enabled;
+        return *this;
+    }
+    Config& metadata_acceleration(bool enabled) noexcept {
+        metadata_acceleration_ = enabled;
+        return *this;
+    }
+    Config& text_embedder(TextEmbedderPtr embedder) noexcept {
+        text_embedder_ = std::move(embedder);
+        return *this;
+    }
 #ifdef ELIPS_GPU_ENABLED
     Config& gpu(gpu::GpuConfig config) noexcept {
         gpu_ = std::move(config);
@@ -72,6 +93,15 @@ public:
     [[nodiscard]] IndexType index() const noexcept { return index_; }
     [[nodiscard]] const GraphParams& graph_params() const noexcept { return graph_; }
     [[nodiscard]] Durability durability() const noexcept { return durability_; }
+    [[nodiscard]] AccessMode access_mode() const noexcept { return access_mode_; }
+    [[nodiscard]] bool segmented_storage() const noexcept { return segmented_storage_; }
+    [[nodiscard]] bool metadata_acceleration() const noexcept { return metadata_acceleration_; }
+    [[nodiscard]] const TextEmbedderPtr& text_embedder() const noexcept {
+        return text_embedder_;
+    }
+    [[nodiscard]] bool has_text_embedder() const noexcept {
+        return static_cast<bool>(text_embedder_);
+    }
 #ifdef ELIPS_GPU_ENABLED
     [[nodiscard]] const gpu::GpuConfig& gpu() const noexcept { return gpu_; }
     [[nodiscard]] bool has_gpu() const noexcept { return gpu_.policy != gpu::GpuPolicy::CpuOnly; }
@@ -83,6 +113,10 @@ private:
     IndexType index_{IndexType::graph};
     GraphParams graph_{};
     Durability durability_{Durability::standard};
+    AccessMode access_mode_{AccessMode::read_write};
+    bool segmented_storage_{true};
+    bool metadata_acceleration_{true};
+    TextEmbedderPtr text_embedder_{};
 #ifdef ELIPS_GPU_ENABLED
     gpu::GpuConfig gpu_{};
 #endif

@@ -4,6 +4,17 @@
 #include <cstring>
 
 namespace elips::gpu {
+namespace {
+
+[[nodiscard]] size_t round_up(size_t value, size_t alignment) noexcept {
+    if (alignment == 0) {
+        return value;
+    }
+    const size_t remainder = value % alignment;
+    return remainder == 0 ? value : value + (alignment - remainder);
+}
+
+} // namespace
 
 GpuMemoryManager::GpuMemoryManager(GpuPort& backend)
     : backend_(backend) {}
@@ -53,15 +64,19 @@ GpuMemoryManager::allocate(size_t bytes, size_t alignment) {
     auto result = backend_.allocate_device(alloc_size);
     if (!result.has_value()) return std::unexpected(result.error());
 
+    void* base_ptr = result->device_ptr();
+    const size_t base_bytes = result->bytes();
+    root_allocations_.push_back(std::move(*result));
+
     allocated_ += bytes;
     peak_allocated_ = std::max(peak_allocated_, allocated_);
 
     if (alloc_size > bytes) {
-        void* remaining = static_cast<char*>(result->device_ptr()) + bytes;
+        void* remaining = static_cast<char*>(base_ptr) + bytes;
         free_blocks_.push_back({remaining, alloc_size - bytes});
     }
 
-    return GpuBuffer{result->device_ptr(), bytes, nullptr};
+    return GpuBuffer{base_ptr, std::min(bytes, base_bytes), nullptr};
 }
 
 void GpuMemoryManager::deallocate(GpuBuffer&& buf) noexcept {
@@ -72,19 +87,13 @@ void GpuMemoryManager::deallocate(GpuBuffer&& buf) noexcept {
 }
 
 std::expected<void*, GpuError> GpuMemoryManager::allocate_pinned(size_t bytes) {
-#if defined(__APPLE__)
-    void* ptr = std::aligned_alloc(4096, bytes);
+    constexpr size_t alignment = 4096;
+    const size_t rounded = round_up(bytes, alignment);
+    void* ptr = std::aligned_alloc(alignment, rounded);
     if (!ptr) return std::unexpected(GpuError::InsufficientMemory);
     std::lock_guard lock(mutex_);
     pinned_blocks_.push_back(ptr);
     return ptr;
-#else
-    void* ptr = std::aligned_alloc(4096, bytes);
-    if (!ptr) return std::unexpected(GpuError::InsufficientMemory);
-    std::lock_guard lock(mutex_);
-    pinned_blocks_.push_back(ptr);
-    return ptr;
-#endif
 }
 
 void GpuMemoryManager::deallocate_pinned(void* ptr) noexcept {
@@ -114,15 +123,17 @@ size_t GpuMemoryManager::peak_bytes_used() const noexcept {
 
 void GpuMemoryManager::shutdown() noexcept {
     std::lock_guard lock(mutex_);
-    for (auto& block : free_blocks_) {
-        backend_.free_device(GpuBuffer{block.ptr, block.bytes, nullptr});
+    for (auto& allocation : root_allocations_) {
+        backend_.free_device(std::move(allocation));
     }
     free_blocks_.clear();
+    root_allocations_.clear();
     for (auto* ptr : pinned_blocks_) {
         std::free(ptr);
     }
     pinned_blocks_.clear();
     pool_bytes_ = 0;
+    allocated_ = 0;
 }
 
 } // namespace elips::gpu

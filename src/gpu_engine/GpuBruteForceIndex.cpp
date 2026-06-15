@@ -8,6 +8,15 @@ GpuBruteForceIndex::GpuBruteForceIndex(GpuPort& backend, elips::Metric metric,
                                        uint16_t dimension, const GpuConfig& config)
     : backend_(backend), metric_(metric), dimension_(dimension) {}
 
+GpuBruteForceIndex::~GpuBruteForceIndex() { release_buffer(); }
+
+void GpuBruteForceIndex::release_buffer() noexcept {
+    if (!database_buffer_) {
+        return;
+    }
+    backend_.free_device(std::move(database_buffer_));
+}
+
 void GpuBruteForceIndex::insert(const RecordID& id, std::span<const float> vector) {
     ids_.push_back(id);
     ++count_;
@@ -53,6 +62,7 @@ GpuBruteForceIndex::build_from_batch(std::span<const float> vectors,
     ids_.assign(ids.begin(), ids.end());
     count_ = ids_.size();
 
+    release_buffer();
     auto alloc = backend_.allocate_device(vectors.size_bytes());
     if (!alloc.has_value()) return std::unexpected(alloc.error());
     database_buffer_ = std::move(*alloc);
