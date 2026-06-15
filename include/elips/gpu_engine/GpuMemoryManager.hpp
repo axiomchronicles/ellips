@@ -1,0 +1,63 @@
+#ifndef ELIPS_GPU_ENGINE_GPU_MEMORY_MANAGER_HPP
+#define ELIPS_GPU_ENGINE_GPU_MEMORY_MANAGER_HPP
+
+#include <cstddef>
+#include <expected>
+#include <memory>
+#include <mutex>
+#include <vector>
+
+#include "elips/gpu_engine/GpuBuffer.hpp"
+#include "elips/gpu_engine/GpuMemoryPort.hpp"
+#include "elips/gpu_engine/GpuPort.hpp"
+#include "elips/gpu_engine/PinnedBuffer.hpp"
+
+namespace elips::gpu {
+
+struct FreeBlock {
+    void* ptr;
+    size_t bytes;
+};
+
+class GpuMemoryManager : public GpuMemoryPort {
+public:
+    explicit GpuMemoryManager(GpuPort& backend);
+    ~GpuMemoryManager() override;
+
+    GpuMemoryManager(const GpuMemoryManager&) = delete;
+    GpuMemoryManager& operator=(const GpuMemoryManager&) = delete;
+    GpuMemoryManager(GpuMemoryManager&&) = delete;
+    GpuMemoryManager& operator=(GpuMemoryManager&&) = delete;
+
+    [[nodiscard]] std::expected<void, GpuError>
+    initialize(size_t pool_bytes);
+
+    [[nodiscard]] std::expected<GpuBuffer, GpuError>
+    allocate(size_t bytes, size_t alignment = 256) override;
+
+    void deallocate(GpuBuffer&& buf) noexcept override;
+
+    [[nodiscard]] std::expected<void*, GpuError>
+    allocate_pinned(size_t bytes) override;
+
+    void deallocate_pinned(void* ptr) noexcept override;
+
+    [[nodiscard]] size_t bytes_used() const noexcept override;
+    [[nodiscard]] size_t bytes_available() const noexcept override;
+    [[nodiscard]] size_t peak_bytes_used() const noexcept override;
+
+    void shutdown() noexcept;
+
+private:
+    GpuPort& backend_;
+    size_t pool_bytes_{0};
+    size_t allocated_{0};
+    size_t peak_allocated_{0};
+    std::vector<FreeBlock> free_blocks_;
+    std::vector<void*> pinned_blocks_;
+    mutable std::mutex mutex_;
+};
+
+} // namespace elips::gpu
+
+#endif
