@@ -9,6 +9,28 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
 
+# Enable Objective-C++ for Metal backend on Apple platforms
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
+
+# ------------------------------- GPU engine -------------------------------
+
+option(ELIPS_GPU_METAL "Enable Apple Metal GPU backend" ON)
+option(ELIPS_GPU_CUDA "Enable NVIDIA CUDA GPU backend" OFF)
+option(ELIPS_GPU_HIP "Enable AMD ROCm/HIP GPU backend" OFF)
+option(ELIPS_GPU_SYCL "Enable Intel oneAPI/SYCL GPU backend" OFF)
+option(ELIPS_GPU_VULKAN "Enable Vulkan compute GPU backend" OFF)
+
+set(ELIPS_GPU_ENABLED OFF)
+if(ELIPS_GPU_CUDA OR ELIPS_GPU_HIP OR ELIPS_GPU_METAL OR ELIPS_GPU_SYCL OR ELIPS_GPU_VULKAN)
+    set(ELIPS_GPU_ENABLED ON)
+endif()
+
+if(ELIPS_GPU_ENABLED)
+    add_subdirectory(src/gpu_engine)
+endif()
+
 # ----------------------------- core library ------------------------------
 add_library(elips_core
     src/RecordID.cpp
@@ -27,6 +49,11 @@ add_library(elips_core
 target_include_directories(elips_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_options(elips_core PRIVATE -Wall -Wextra -Wpedantic)
 
+if(ELIPS_GPU_ENABLED)
+    target_link_libraries(elips_core PUBLIC elips_gpu)
+    target_compile_definitions(elips_core PUBLIC ELIPS_GPU_ENABLED)
+endif()
+
 # -------------------------------- elips-cli ------------------------------
 option(ELIPS_BUILD_CLI "Build the elips command-line tool" ON)
 if(ELIPS_BUILD_CLI)
@@ -42,6 +69,13 @@ if(ELIPS_BUILD_BENCH)
     add_executable(elips_bench benchmarks/BenchMain.cpp)
     target_link_libraries(elips_bench PRIVATE elips_core)
     target_compile_options(elips_bench PRIVATE -Wall -Wextra -Wpedantic)
+
+    if(ELIPS_GPU_ENABLED)
+        add_executable(elips_gpu_bench benchmarks/gpu/BenchGpuSearch.cpp)
+        target_link_libraries(elips_gpu_bench PRIVATE elips_core)
+        target_compile_definitions(elips_gpu_bench PRIVATE ELIPS_GPU_ENABLED)
+        target_compile_options(elips_gpu_bench PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
 endif()
 
 # -------------------------------- tests ----------------------------------
@@ -71,6 +105,24 @@ if(ELIPS_BUILD_TESTS)
     )
     target_link_libraries(elips_tests PRIVATE elips_core GTest::gtest_main)
 
+if(ELIPS_GPU_ENABLED)
+    target_sources(elips_tests PRIVATE
+        tests/unit/gpu/GpuDeviceManagerTest.cpp
+        tests/unit/gpu/GpuMemoryManagerTest.cpp
+        tests/unit/gpu/DynamicBatcherTest.cpp
+        tests/integration/gpu/MetalBackendTest.cpp
+        tests/parity/CpuGpuRecallParityTest.cpp
+    )
+    target_compile_definitions(elips_tests PRIVATE ELIPS_GPU_ENABLED)
+    if(APPLE AND ELIPS_GPU_METAL)
+        target_link_libraries(elips_tests PRIVATE elips_gpu_metal)
+        find_library(METAL_FW Metal)
+        find_library(MPS_FW MetalPerformanceShaders)
+        find_library(FOUNDATION_FW Foundation)
+        target_link_libraries(elips_tests PRIVATE ${METAL_FW} ${MPS_FW} ${FOUNDATION_FW})
+    endif()
+endif()
+
     include(GoogleTest)
     gtest_discover_tests(elips_tests)
 endif()
@@ -88,6 +140,9 @@ if(ELIPS_BUILD_PYTHON)
 
     pybind11_add_module(elips_pymodule bindings/python/elips_python.cpp)
     target_link_libraries(elips_pymodule PRIVATE elips_core)
+    if(ELIPS_GPU_ENABLED)
+        target_compile_definitions(elips_pymodule PRIVATE ELIPS_GPU_ENABLED)
+    endif()
     set_target_properties(elips_pymodule PROPERTIES
         OUTPUT_NAME _core
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bindings/python/elips
