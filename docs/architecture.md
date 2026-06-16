@@ -82,3 +82,7 @@ There are two layers:
 The modern wrapper prefers native core text APIs when a `Config.text_embedder()`
 is configured and otherwise falls back to Python-side embedding plus hybrid
 querying.
+
+For the detailed FAISS reverse-engineering and the corresponding Elips GPU
+index design and implementation plan, see
+[FAISS GPU Acceleration Design](/Users/kuroyami/ellips/docs/architecture/faiss-gpu-acceleration-design.md).
