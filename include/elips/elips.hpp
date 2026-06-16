@@ -180,13 +180,15 @@ private:
     bool closed_{false};
     std::optional<LockManager> lock_;
     std::unique_ptr<WAL> wal_;
-    std::map<std::string, std::unique_ptr<Vault>> vaults_;
 #ifdef ELIPS_GPU_ENABLED
     gpu::GpuDeviceInfo gpu_info_;
     gpu::GpuMetricsSnapshot gpu_stats_;
     bool gpu_available_{false};
+    // Vaults and GPU indexes only observe the backend, so the owner must
+    // outlive every vault teardown path.
     std::unique_ptr<gpu::GpuPort> gpu_backend_;
 #endif
+    std::map<std::string, std::unique_ptr<Vault>> vaults_;
 };
 
 [[nodiscard]] std::unique_ptr<ElipsInstance> open(const std::string& path,

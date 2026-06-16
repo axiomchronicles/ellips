@@ -24,6 +24,7 @@
 #include "elips/gpu_engine/GpuDeviceManager.hpp"
 #include "elips/gpu_engine/GpuDeviceInfo.hpp"
 #include "elips/gpu_engine/GpuMetricsSnapshot.hpp"
+#include "elips/gpu_engine/GpuSelector.hpp"
 #endif
 
 namespace elips {
@@ -352,11 +353,13 @@ void load_segmented_state(const fs::path& root, ElipsInstance& instance) {
 
 void configure_gpu_backend(ElipsInstance& instance, const Config& config) {
 #ifdef ELIPS_GPU_ENABLED
+    gpu::GpuDeviceManager manager;
+    instance.set_gpu_info(manager.cpu_fallback_info());
+
     if (!config.has_gpu() || config.gpu().policy == gpu::GpuPolicy::CpuOnly) {
         return;
     }
 
-    gpu::GpuDeviceManager manager;
     const auto devices = manager.probe_all_devices();
     if (devices.empty()) {
         if (config.gpu().policy == gpu::GpuPolicy::RequireGpu ||
@@ -367,7 +370,8 @@ void configure_gpu_backend(ElipsInstance& instance, const Config& config) {
         return;
     }
 
-    auto selected = manager.select(config.gpu(), devices);
+    gpu::GpuSelector selector;
+    auto selected = selector.select(config.gpu(), devices);
     if (!selected.has_value() || *selected == nullptr) {
         if (config.gpu().policy == gpu::GpuPolicy::RequireGpu ||
             config.gpu().policy == gpu::GpuPolicy::Specific) {
@@ -849,6 +853,10 @@ ElipsInstance::~ElipsInstance() {
             // E.16: destructors must not throw. Best-effort checkpoint.
         }
     }
+
+    // Vault-owned GPU indexes hold non-owning backend references, so release
+    // every vault before member destruction reaches gpu_backend_.
+    vaults_.clear();
 }
 
 Vault& ElipsInstance::vault(const std::string& name) {

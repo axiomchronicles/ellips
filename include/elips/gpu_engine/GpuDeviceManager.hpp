@@ -15,6 +15,9 @@ class GpuDeviceManager {
 public:
     GpuDeviceManager() = default;
 
+    [[nodiscard]] GpuDeviceInfo cpu_fallback_info() const noexcept;
+    [[nodiscard]] GpuDeviceInfo runtime_device_info() const;
+
     [[nodiscard]] std::vector<GpuDeviceInfo> probe_all_devices() const;
 
     [[nodiscard]] std::optional<std::unique_ptr<GpuPort>>

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <string_view>
 
+#include "elips/gpu_engine/GpuSelector.hpp"
+
 #if defined(__APPLE__) && defined(ELIPS_METAL_ENABLED)
 #include "MetalBackend.hpp"
 #endif
@@ -26,7 +28,7 @@
 namespace elips::gpu {
 namespace {
 
-GpuDeviceInfo cpu_fallback_info() {
+GpuDeviceInfo make_cpu_fallback_info() {
     GpuDeviceInfo info;
     info.name = "CPU (SIMD)";
     info.vendor = "CPU";
@@ -40,6 +42,28 @@ GpuDeviceInfo cpu_fallback_info() {
 }
 
 } // namespace
+
+GpuDeviceInfo GpuDeviceManager::cpu_fallback_info() const noexcept {
+    return make_cpu_fallback_info();
+}
+
+GpuDeviceInfo GpuDeviceManager::runtime_device_info() const {
+    const auto devices = probe_all_devices();
+    if (devices.empty()) {
+        return cpu_fallback_info();
+    }
+
+    GpuSelector selector;
+    GpuConfig config;
+    auto selected = selector.select(config, devices);
+    if (!selected.has_value() || *selected == nullptr) {
+        return cpu_fallback_info();
+    }
+
+    const GpuDeviceInfo info = (*selected)->device_info();
+    (*selected)->shutdown();
+    return info;
+}
 
 std::vector<GpuDeviceInfo> GpuDeviceManager::probe_all_devices() const {
     std::vector<GpuDeviceInfo> devices;

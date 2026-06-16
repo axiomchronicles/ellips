@@ -36,7 +36,7 @@ public:
         return GpuBuffer{nullptr, bytes, this};
     }
 
-    void free_device(GpuBuffer&& buf) noexcept override {
+    void free_device(GpuBuffer buf) noexcept override {
         if (buf.backend_handle() == this) {
             ++free_calls_;
         }

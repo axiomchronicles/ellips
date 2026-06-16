@@ -80,7 +80,9 @@ sequenceDiagram
             GPU-->>Open: vector<GpuDeviceInfo> (sorted: CAGRA first, then by memory)
             alt devices not empty
                 Open->>Inst: set_gpu_available(true)
-                Open->>Inst: set_gpu_info(devices.front())
+                Open->>Inst: set_gpu_info(selected GPU device)
+            else no GPU backend selected
+                Open->>Inst: set_gpu_info(CPU fallback metadata)
             end
         end
 

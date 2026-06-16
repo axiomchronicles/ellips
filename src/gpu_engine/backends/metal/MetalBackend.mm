@@ -148,7 +148,7 @@ std::expected<GpuBuffer, GpuError> MetalBackend::allocate_device(size_t bytes) {
     }
 }
 
-void MetalBackend::free_device(GpuBuffer&& buf) noexcept {
+void MetalBackend::free_device(GpuBuffer buf) noexcept {
     if (buf.backend_handle()) {
         CFRelease(buf.backend_handle());
     }

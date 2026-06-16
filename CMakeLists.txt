@@ -136,6 +136,16 @@ if(ELIPS_GPU_ENABLED)
         find_library(FOUNDATION_FW Foundation)
         target_link_libraries(elips_tests PRIVATE ${METAL_FW} ${MPS_FW} ${FOUNDATION_FW})
     endif()
+
+    add_executable(elips_gpu_lifecycle_probe
+        tests/integration/gpu/DatabaseGpuLifecycleProbe.cpp
+    )
+    target_link_libraries(elips_gpu_lifecycle_probe PRIVATE elips_core)
+    if(APPLE AND ELIPS_GPU_METAL)
+        target_link_libraries(elips_gpu_lifecycle_probe PRIVATE elips_gpu_metal)
+        target_link_libraries(elips_gpu_lifecycle_probe PRIVATE ${METAL_FW} ${MPS_FW} ${FOUNDATION_FW})
+    endif()
+    add_test(NAME GpuDatabaseLifecycleProbe COMMAND elips_gpu_lifecycle_probe)
 endif()
 
     include(GoogleTest)

@@ -24,7 +24,7 @@ Comprehensive index of the ELIPS Python API, organized by subsystem.
   - `db.checkpoint()` — Persist state, truncate WAL
   - `db.close()` — Checkpoint and release lock
   - `db.config` — The active configuration object
-  - `db.gpu_info()` — GPU device information (if GPU enabled)
+  - `db.gpu_info()` — Active accelerator device information or CPU fallback (if GPU enabled)
   - `db.gpu_stats()` — GPU performance metrics (if GPU enabled)
 
 ### Configuration
@@ -175,7 +175,7 @@ All enums are available as `elips.<EnumName>.<value>`:
   - `.max_batch_size` — Maximum queries per batch
   - `.ef_search` — GPU beam width
 
-- [**GpuDeviceInfo**](gpu/device_info.md) — GPU device
+- [**GpuDeviceInfo**](gpu/device_info.md) — Active accelerator device snapshot
   - `info.name` — Device name
   - `info.vendor` — Vendor name
   - `info.memory_gb` — Total device memory

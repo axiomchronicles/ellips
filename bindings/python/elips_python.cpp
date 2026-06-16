@@ -16,6 +16,7 @@
 
 #ifdef ELIPS_GPU_ENABLED
 #include "elips/gpu_engine/GpuConfig.hpp"
+#include "elips/gpu_engine/GpuDeviceManager.hpp"
 #include "elips/gpu_engine/GpuDeviceInfo.hpp"
 #include "elips/gpu_engine/GpuMetricsSnapshot.hpp"
 #include "elips/gpu_engine/GpuPort.hpp"
@@ -601,7 +602,10 @@ PYBIND11_MODULE(_core, m) {
         });
 
     py::class_<elips::gpu::GpuDeviceInfo>(m, "GpuDeviceInfo")
-        .def(py::init<>())
+        .def(py::init([]() {
+            elips::gpu::GpuDeviceManager manager;
+            return manager.runtime_device_info();
+        }))
         .def_readonly("name", &elips::gpu::GpuDeviceInfo::name)
         .def_readonly("vendor", &elips::gpu::GpuDeviceInfo::vendor)
         .def_readonly("backend", &elips::gpu::GpuDeviceInfo::backend)

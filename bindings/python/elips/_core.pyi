@@ -298,7 +298,7 @@ class GpuConfig:
     def __repr__(self) -> str: ...
 
 class GpuDeviceInfo:
-    """Information about a detected GPU device."""
+    """Information about the active accelerator device or CPU fallback."""
 
     def __init__(self) -> None: ...
 
@@ -732,7 +732,7 @@ class Database:
         """
 
     def gpu_info(self) -> "GpuDeviceInfo":
-        """Return information about the detected GPU device."""
+        """Return information about the active accelerator device or CPU fallback."""
 
     def gpu_stats(self) -> "GpuMetricsSnapshot":
         """Return a snapshot of GPU runtime metrics."""

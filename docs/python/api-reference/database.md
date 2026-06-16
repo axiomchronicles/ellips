@@ -106,8 +106,10 @@ runtime options such as access mode and metadata acceleration.
 
 ### `gpu_info()` and `gpu_stats()`
 
-Available only when the Python extension is built with GPU support and a GPU
-backend is configured.
+Available only when the Python extension is built with GPU support.
+
+`gpu_info()` reports the active accelerator device when a GPU backend is
+selected, and otherwise returns non-empty CPU fallback metadata.
 
 ## Context Manager
 

@@ -153,4 +153,7 @@ When the extension is built with GPU support, ELIPS also exposes:
 - `GpuDeviceInfo`
 - `GpuMetricsSnapshot`
 
-Use `elips._has_gpu` to detect availability at runtime.
+Use `elips._has_gpu` to detect whether GPU bindings were compiled into the
+extension module. Use `elips.GpuDeviceInfo()` or `db.gpu_info()` to inspect the
+active runtime device, which may still be the CPU fallback when no GPU backend
+is selected.

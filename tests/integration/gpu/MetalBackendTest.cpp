@@ -36,6 +36,27 @@ TEST_F(GpuBackendIntegrationTest, initialize_succeeds) {
     EXPECT_TRUE(backend_->is_available());
 }
 
+TEST(GpuBackendLifecycleTest, repeated_selection_reports_non_empty_device_metadata) {
+    GpuDeviceManager manager;
+    GpuSelector selector;
+    GpuConfig config;
+    config.policy = GpuPolicy::Auto;
+
+    constexpr int kIterations = 25;
+    for (int iteration = 0; iteration < kIterations; ++iteration) {
+        auto devices = manager.probe_all_devices();
+        auto selected = selector.select(config, devices);
+        if (!selected.has_value()) {
+            GTEST_SKIP() << "No GPU available";
+        }
+
+        const auto info = (*selected)->device_info();
+        EXPECT_FALSE(info.name.empty()) << "iteration " << iteration;
+        EXPECT_FALSE(info.vendor.empty()) << "iteration " << iteration;
+        EXPECT_FALSE(info.backend.empty()) << "iteration " << iteration;
+    }
+}
+
 TEST_F(GpuBackendIntegrationTest, allocate_upload_download_roundtrip) {
     if (!backend_) GTEST_SKIP() << "No GPU available";
 
@@ -57,6 +78,44 @@ TEST_F(GpuBackendIntegrationTest, allocate_upload_download_roundtrip) {
     }
 
     backend_->free_device(std::move(*buf));
+}
+
+TEST_F(GpuBackendIntegrationTest,
+       repeated_allocation_transfer_cleanup_remains_stable) {
+    if (!backend_) GTEST_SKIP() << "No GPU available";
+
+    constexpr size_t kIterations = 64;
+    constexpr size_t kElementCount = 128;
+    const size_t bytes = kElementCount * sizeof(float);
+
+    std::vector<float> host_data(kElementCount);
+    std::vector<float> host_out(kElementCount);
+    for (size_t iteration = 0; iteration < kIterations; ++iteration) {
+        for (size_t i = 0; i < kElementCount; ++i) {
+            host_data[i] =
+                static_cast<float>((iteration + i) % 17) / 16.0f;
+        }
+
+        auto buf = backend_->allocate_device(bytes);
+        ASSERT_TRUE(buf.has_value()) << "iteration " << iteration;
+
+        auto up = backend_->upload(host_data.data(), *buf, bytes);
+        ASSERT_TRUE(up.has_value()) << "iteration " << iteration;
+
+        std::fill(host_out.begin(), host_out.end(), 0.0f);
+        auto down = backend_->download(*buf, host_out.data(), bytes);
+        ASSERT_TRUE(down.has_value()) << "iteration " << iteration;
+
+        for (size_t i = 0; i < host_data.size(); ++i) {
+            EXPECT_FLOAT_EQ(host_data[i], host_out[i])
+                << "iteration " << iteration << " element " << i;
+        }
+
+        backend_->free_device(std::move(*buf));
+    }
+
+    backend_->synchronize();
+    EXPECT_TRUE(backend_->is_idle());
 }
 
 TEST_F(GpuBackendIntegrationTest, cosine_distance_matches_cpu) {
@@ -125,6 +184,25 @@ TEST_F(GpuBackendIntegrationTest, brute_force_index_search) {
     std::vector<float> query = {1.0f, 0.0f, 0.0f};
     auto results = index.search(query, 3);
     EXPECT_EQ(results.size(), 3u);
+}
+
+TEST_F(GpuBackendIntegrationTest, brute_force_index_replace_same_id_is_stable) {
+    if (!backend_) GTEST_SKIP() << "No GPU available";
+
+    GpuConfig gconfig;
+    gconfig.algorithm = GpuIndexAlgorithm::BruteForce;
+
+    GpuBruteForceIndex index(*backend_, Metric::cosine, 2, gconfig);
+
+    const RecordID id = RecordID::generate();
+
+    index.insert(id, std::vector<float>{1.0f, 0.0f});
+    index.remove(id);
+    index.insert(id, std::vector<float>{0.0f, 1.0f});
+
+    const auto results = index.search(std::vector<float>{0.0f, 1.0f}, 1);
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_EQ(results[0].first, id);
 }
 
 }  // namespace

@@ -6,8 +6,10 @@ Tests every exposed Python API for correctness, typing, and C++ parity.
 import sys
 import os
 import gc
+import subprocess
 import threading
 import tempfile
+import textwrap
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "bindings", "python"))
 import elips
@@ -41,6 +43,35 @@ def make_lineage(provider="pytest", model="toy", revision=""):
     lineage.revision = revision
     lineage.attributes = {}
     return lineage
+
+
+def assert_device_info_populated(info):
+    assert info.name != "", "device name should be populated"
+    assert info.vendor != "", "device vendor should be populated"
+    assert info.backend != "", "device backend should be populated"
+
+
+def run_binding_subprocess(script):
+    bindings_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "bindings", "python")
+    )
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+    env = os.environ.copy()
+    existing_path = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        bindings_dir
+        if not existing_path
+        else bindings_dir + os.pathsep + existing_path
+    )
+
+    return subprocess.run(
+        [sys.executable, "-X", "faulthandler", "-u", "-c", script],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
 
 
 def test_exceptions():
@@ -495,7 +526,7 @@ def test_gpu_device_info():
         return
 
     info = elips.GpuDeviceInfo()
-    info.name  # just verify no crash
+    assert_device_info_populated(info)
     assert hasattr(info, "peak_tflops_fp32")
     assert hasattr(info, "peak_tflops_fp16")
     assert hasattr(info, "supports_dynamic_batching")
@@ -505,6 +536,165 @@ def test_gpu_device_info():
     assert hasattr(info, "host_to_device_bandwidth_gb_s")
 
     print("  PASS test_gpu_device_info")
+
+
+def test_database_gpu_info_matches_runtime_snapshot():
+    """Database GPU info matches the default runtime device snapshot."""
+    if not elips._has_gpu:
+        print("  SKIP test_database_gpu_info_matches_runtime_snapshot (no GPU bindings)")
+        return
+
+    db = elips.open(":memory:", dimension=2)
+    db_info = db.gpu_info()
+    runtime_info = elips.GpuDeviceInfo()
+
+    assert_device_info_populated(db_info)
+    assert_device_info_populated(runtime_info)
+    assert db_info.name == runtime_info.name
+    assert db_info.vendor == runtime_info.vendor
+    assert db_info.backend == runtime_info.backend
+    assert db_info.device_index == runtime_info.device_index
+
+    print("  PASS test_database_gpu_info_matches_runtime_snapshot")
+
+
+def test_cpu_only_gpu_policy_reports_cpu_fallback():
+    """CPU-only policy still returns non-empty fallback device metadata."""
+    if not elips._has_gpu:
+        print("  SKIP test_cpu_only_gpu_policy_reports_cpu_fallback (no GPU bindings)")
+        return
+
+    gpu = elips.GpuConfig()
+    gpu.policy = elips.GpuPolicy.cpu_only
+    config = elips.Config().dimension(2).gpu(gpu)
+
+    db = elips.open_with_config(":memory:", config)
+    info = db.gpu_info()
+
+    assert_device_info_populated(info)
+    assert info.backend == "cpu"
+    assert info.vendor == "CPU"
+
+    print("  PASS test_cpu_only_gpu_policy_reports_cpu_fallback")
+
+
+def test_gpu_database_teardown_subprocess():
+    """GPU-backed database teardown should not crash the Python interpreter."""
+    if not elips._has_gpu:
+        print("  SKIP test_gpu_database_teardown_subprocess (no GPU bindings)")
+        return
+
+    script = textwrap.dedent(
+        """
+        import tempfile
+        import elips
+
+        gpu = elips.GpuConfig()
+        gpu.policy = elips.GpuPolicy.require_gpu
+        gpu.build_mode = elips.IndexBuildMode.gpu_build_gpu_serve
+        gpu.algorithm = elips.GpuIndexAlgorithm.brute_force
+
+        config = elips.Config().dimension(2).metric("cosine").gpu(gpu)
+
+        def run():
+            with tempfile.TemporaryDirectory() as td:
+                db = elips.open_with_config(td, config)
+                vault = db.vault("docs")
+                vault.place([1.0, 0.0], {"kind": "alpha"})
+                vault.place([0.0, 1.0], {"kind": "beta"})
+                hits = vault.seek([1.0, 0.0], top=2)
+                assert len(hits) == 2
+                print(db.gpu_info())
+
+        run()
+        print("subprocess teardown ok")
+        """
+    )
+
+    result = run_binding_subprocess(script)
+
+    assert result.returncode == 0, (
+        "GPU teardown subprocess crashed:\n"
+        f"stdout:\n{result.stdout}\n"
+        f"stderr:\n{result.stderr}"
+    )
+    assert "subprocess teardown ok" in result.stdout
+
+    print("  PASS test_gpu_database_teardown_subprocess")
+
+
+def test_gpu_modern_merge_replaces_existing_key_subprocess():
+    """GPU-backed modern merge should replace an existing key without crashing."""
+    if not elips._has_gpu:
+        print("  SKIP test_gpu_modern_merge_replaces_existing_key_subprocess (no GPU bindings)")
+        return
+
+    script = textwrap.dedent(
+        """
+        import tempfile
+        import elips
+
+        def toy_embed(texts):
+            out = []
+            for text in texts:
+                lowered = text.lower()
+                out.append([
+                    1.0 if "alpha" in lowered else 0.0,
+                    1.0 if "beta" in lowered else 0.0,
+                ])
+            return out
+
+        gpu = elips.GpuConfig()
+        gpu.policy = elips.GpuPolicy.require_gpu
+        gpu.build_mode = elips.IndexBuildMode.gpu_build_gpu_serve
+        gpu.algorithm = elips.GpuIndexAlgorithm.brute_force
+
+        config = (
+            elips.Config()
+            .dimension(2)
+            .metric("cosine")
+            .index("exact")
+            .metadata_acceleration(False)
+            .gpu(gpu)
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            engine = elips.connect_with_config(
+                td,
+                config,
+                embedder=toy_embed,
+                embedder_provider="pytest",
+                embedder_model="toy",
+            )
+            arena = engine.arena("docs")
+            key = arena.write(vector=[1.0, 0.0], text="alpha old", meta={"rev": 1})
+            arena.merge(
+                vectors=[[0.0, 1.0]],
+                texts=["beta new"],
+                meta=[{"rev": 2}],
+                keys=[key],
+            )
+            rows = arena.pull([key], include_vectors=True)
+            assert len(rows) == 1
+            assert rows[0].text == "beta new"
+            assert rows[0].meta["rev"] == 2
+            hits = arena.probe([0.0, 1.0], top=5)
+            assert len(hits) == 1
+            assert hits[0].key == key
+            print("gpu merge replace ok")
+        """
+    )
+
+    result = run_binding_subprocess(script)
+
+    assert result.returncode == 0, (
+        "GPU merge subprocess crashed:\n"
+        f"stdout:\n{result.stdout}\n"
+        f"stderr:\n{result.stderr}"
+    )
+    assert "gpu merge replace ok" in result.stdout
+
+    print("  PASS test_gpu_modern_merge_replaces_existing_key_subprocess")
 
 
 def test_thread_safety_python():
@@ -650,11 +840,17 @@ def test_modern_probe_hybrid_and_explain():
         where=elips.Filter().field("kind").equals("alpha"),
         has_text_component=True,
     )
+    runtime_info = elips.GpuDeviceInfo() if elips._has_gpu else None
+    uses_gpu_index = runtime_info is not None and runtime_info.backend != "cpu"
+
     assert plan.strategy == elips.QueryStrategy.hybrid_fusion
     assert plan.metadata_accelerated is True
     assert plan.candidate_count >= 1
-    assert plan.gpu_index is False
-    assert plan.index_type == "graph"
+    assert plan.gpu_index is uses_gpu_index
+    if uses_gpu_index:
+        assert plan.index_type.startswith("gpu_")
+    else:
+        assert plan.index_type == "graph"
 
     print("  PASS test_modern_probe_hybrid_and_explain")
 
@@ -811,6 +1007,10 @@ if __name__ == "__main__":
         test_eql_query,
         test_gpu_config,
         test_gpu_device_info,
+        test_database_gpu_info_matches_runtime_snapshot,
+        test_cpu_only_gpu_policy_reports_cpu_fallback,
+        test_gpu_database_teardown_subprocess,
+        test_gpu_modern_merge_replaces_existing_key_subprocess,
         test_thread_safety_python,
         test_edge_cases,
         test_memory_leak_check,

@@ -52,7 +52,9 @@ public:
     [[nodiscard]] virtual std::expected<GpuBuffer, GpuError>
     allocate_device(size_t bytes) = 0;
 
-    virtual void free_device(GpuBuffer&& buf) noexcept = 0;
+    // Consume buffers by value so ownership-transfer call sites actually clear
+    // their moved-from state before any repeated cleanup path runs.
+    virtual void free_device(GpuBuffer buf) noexcept = 0;
 
     [[nodiscard]] virtual std::expected<void, GpuError>
     upload(const void* host_src, GpuBuffer& dst, size_t bytes) = 0;

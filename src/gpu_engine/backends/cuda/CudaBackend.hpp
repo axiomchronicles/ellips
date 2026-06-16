@@ -21,7 +21,7 @@ public:
     [[nodiscard]] bool is_available() const noexcept override;
 
     [[nodiscard]] std::expected<GpuBuffer, GpuError> allocate_device(size_t bytes) override;
-    void free_device(GpuBuffer&& buf) noexcept override;
+    void free_device(GpuBuffer buf) noexcept override;
 
     [[nodiscard]] std::expected<void, GpuError>
     upload(const void* host_src, GpuBuffer& dst, size_t bytes) override;
