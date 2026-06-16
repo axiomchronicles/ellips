@@ -85,6 +85,37 @@ flt = elips.Filter().field("tenant").equals(tenant_id).field("lang").equals("en"
 hits = docs.seek(embed(query), top=10, where=flt)
 ```
 
+## GPU ANN selection
+
+```python
+gpu = elips.GpuConfig()
+gpu.policy = elips.GpuPolicy.prefer_gpu
+gpu.algorithm = elips.GpuIndexAlgorithm.ivf_pq
+gpu.ef_search = 48
+gpu.ivf_pq_params.n_lists = 2048
+gpu.ivf_pq_params.pq_dim = 48
+gpu.ivf_pq_params.pq_bits = 8
+
+config = (
+    elips.Config()
+    .dimension(384)
+    .metric("cosine")
+    .index("exact")
+    .gpu(gpu)
+)
+
+db = elips.open_with_config("/data/search-gpu", config)
+docs = db.vault("corpus")
+hits = docs.seek(embed("how do vaccines work?"), top=10)
+```
+
+Switch `gpu.algorithm` to:
+
+- `elips.GpuIndexAlgorithm.brute_force` for exact GPU scan
+- `elips.GpuIndexAlgorithm.ivf_flat` for lower-compression GPU ANN
+- `elips.GpuIndexAlgorithm.cagra` with `.index("graph")` for the graph-oriented
+  GPU path
+
 These patterns compose: filters, thresholds, projections, and EQL bindings cover
 classification, clustering seeds, few-shot example retrieval, code search, image
 similarity, and anomaly detection (large nearest-neighbor distance) with the same

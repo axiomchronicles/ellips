@@ -157,3 +157,74 @@ Use `elips._has_gpu` to detect whether GPU bindings were compiled into the
 extension module. Use `elips.GpuDeviceInfo()` or `db.gpu_info()` to inspect the
 active runtime device, which may still be the CPU fallback when no GPU backend
 is selected.
+
+### `GpuConfig` Example
+
+```python
+gpu = elips.GpuConfig()
+gpu.policy = elips.GpuPolicy.prefer_gpu
+gpu.build_mode = elips.IndexBuildMode.gpu_build_gpu_serve
+gpu.algorithm = elips.GpuIndexAlgorithm.ivf_pq
+gpu.precision = elips.GpuPrecision.auto
+gpu.ef_search = 48
+
+gpu.ivf_pq_params.n_lists = 2048
+gpu.ivf_pq_params.pq_dim = 48
+gpu.ivf_pq_params.pq_bits = 8
+gpu.ivf_pq_params.kmeans_n_iters = 20
+
+config = (
+    elips.Config()
+    .dimension(384)
+    .metric("cosine")
+    .index("exact")
+    .gpu(gpu)
+)
+```
+
+### `GpuIndexAlgorithm`
+
+- `auto`
+  - Lets Elips choose a GPU path from backend capabilities. Today it prefers
+    the IVF path when supported and otherwise falls back toward brute force.
+- `brute_force`
+  - Exact GPU scan.
+- `ivf_flat`
+  - Coarse-list routing on GPU followed by exact reranking of gathered
+    candidates.
+- `ivf_pq`
+  - Coarse-list routing plus residual PQ approximation on GPU, followed by
+    exact reranking of a shortlist.
+- `cagra`
+  - Elips' graph-oriented GPU path. In the current implementation this keeps a
+    CPU graph mirror as the authoritative topology and mirrors vectors on
+    device; it is not vendor-specific CAGRA kernels.
+
+Recommended pairings:
+
+- `index("exact")` with `brute_force`, `ivf_flat`, or `ivf_pq`
+- `index("graph")` with `cagra`
+
+### `IndexBuildMode`
+
+- `gpu_build_cpu_serve`
+- `gpu_build_gpu_serve`
+- `hybrid`
+
+The full enum is available in Python, but today Elips already keeps CPU and GPU
+state synchronized for the non-brute-force GPU algorithms through a hybrid
+runtime path.
+
+### `IvfPqBuildParams`
+
+```python
+ivf = elips.IvfPqBuildParams()
+ivf.n_lists = 1024
+ivf.pq_dim = 48
+ivf.pq_bits = 8
+ivf.kmeans_n_iters = 20
+
+gpu = elips.GpuConfig()
+gpu.algorithm = elips.GpuIndexAlgorithm.ivf_pq
+gpu.ivf_pq_params = ivf
+```

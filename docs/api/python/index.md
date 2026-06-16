@@ -168,12 +168,21 @@ All enums are available as `elips.<EnumName>.<value>`:
 - [**GpuConfig**](gpu/config.md) — GPU settings
   - `elips.GpuConfig()` — GPU configuration builder
   - `.policy` — `GpuPolicy` enum
+  - `.build_mode` — `IndexBuildMode` enum
   - `.algorithm` — `GpuIndexAlgorithm` enum
   - `.precision` — `GpuPrecision` enum
+  - `.graph_params` — Graph-oriented GPU build parameters
+  - `.ivf_pq_params` — IVF and IVF-PQ tuning parameters
   - `.device_memory_pool_mb` — Pool size in MB
   - `.fp16_search` — Half-precision flag (bool)
   - `.max_batch_size` — Maximum queries per batch
   - `.ef_search` — GPU beam width
+
+  Common selections:
+  - `brute_force` — exact GPU scan
+  - `ivf_flat` — coarse-quantized ANN on GPU
+  - `ivf_pq` — compressed ANN on GPU
+  - `cagra` — Elips' graph-oriented GPU path
 
 - [**GpuDeviceInfo**](gpu/device_info.md) — Active accelerator device snapshot
   - `info.name` — Device name

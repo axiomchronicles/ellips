@@ -12,6 +12,13 @@ cmake --build build --target elips_pymodule
 export PYTHONPATH=$PWD/bindings/python
 ```
 
+You can smoke-test the Python bindings with:
+
+```bash
+PYTHONPATH=bindings/python python3 bindings/python/test.py
+PYTHONPATH=bindings/python python3 bindings/python/test.py --gpu-algorithm ivf_pq
+```
+
 ## 2. Open A Database
 
 Low-level open:
@@ -47,7 +54,95 @@ config = (
 db = elips.open_with_config("/tmp/elips-quickstart", config)
 ```
 
-## 3. Ingest Documents
+## 3. Optional GPU Configuration
+
+If the extension was built with GPU support, the Python bindings expose
+`GpuConfig`, `GpuIndexAlgorithm`, `GraphIndexBuildParams`, and
+`IvfPqBuildParams`.
+
+Exact GPU scan:
+
+```python
+gpu = elips.GpuConfig()
+gpu.policy = elips.GpuPolicy.require_gpu
+gpu.build_mode = elips.IndexBuildMode.gpu_build_gpu_serve
+gpu.algorithm = elips.GpuIndexAlgorithm.brute_force
+
+config = (
+    elips.Config()
+    .dimension(384)
+    .metric("cosine")
+    .index("exact")
+    .gpu(gpu)
+)
+```
+
+IVF-Flat on GPU:
+
+```python
+gpu = elips.GpuConfig()
+gpu.policy = elips.GpuPolicy.prefer_gpu
+gpu.algorithm = elips.GpuIndexAlgorithm.ivf_flat
+gpu.ivf_pq_params.n_lists = 1024
+gpu.ef_search = 32
+
+config = (
+    elips.Config()
+    .dimension(384)
+    .metric("cosine")
+    .index("exact")
+    .gpu(gpu)
+)
+```
+
+IVF-PQ on GPU:
+
+```python
+gpu = elips.GpuConfig()
+gpu.policy = elips.GpuPolicy.prefer_gpu
+gpu.algorithm = elips.GpuIndexAlgorithm.ivf_pq
+gpu.ivf_pq_params.n_lists = 2048
+gpu.ivf_pq_params.pq_dim = 48
+gpu.ivf_pq_params.pq_bits = 8
+gpu.ivf_pq_params.kmeans_n_iters = 20
+
+config = (
+    elips.Config()
+    .dimension(384)
+    .metric("cosine")
+    .index("exact")
+    .gpu(gpu)
+)
+```
+
+Graph-oriented GPU path:
+
+```python
+gpu = elips.GpuConfig()
+gpu.policy = elips.GpuPolicy.prefer_gpu
+gpu.algorithm = elips.GpuIndexAlgorithm.cagra
+gpu.graph_params.graph_degree = 48
+gpu.graph_params.intermediate_graph_degree = 96
+
+config = (
+    elips.Config()
+    .dimension(384)
+    .metric("cosine")
+    .index("graph")
+    .gpu(gpu)
+)
+```
+
+Notes:
+
+- Use `index("exact")` with `brute_force`, `ivf_flat`, and `ivf_pq`.
+- Use `index("graph")` with `cagra`.
+- In the current Elips runtime, the non-brute-force GPU algorithms serve through
+  a hybrid wrapper that keeps a CPU mirror synchronized with the GPU leaf.
+- `GpuIndexAlgorithm.cagra` currently selects Elips' graph-oriented GPU path,
+  not the FAISS/NVIDIA-specific CAGRA kernel stack.
+
+## 4. Ingest Documents
 
 ```python
 docs = db.vault("documents")
@@ -77,7 +172,7 @@ docs.place(
 )
 ```
 
-## 4. Query
+## 5. Query
 
 Vector search:
 
@@ -106,7 +201,7 @@ plan = docs.explain_seek([1.0, 0.0], top=1, where=where, has_text_component=True
 print(plan.strategy.name, plan.metadata_accelerated, plan.candidate_count)
 ```
 
-## 5. Scan, Fetch, And Maintain
+## 6. Scan, Fetch, And Maintain
 
 ```python
 record = docs.fetch(rid)
@@ -120,7 +215,7 @@ db.compact()
 db.close()
 ```
 
-## 6. Shared Read-Only Reopen
+## 7. Shared Read-Only Reopen
 
 ```python
 reader = elips.open("/tmp/elips-quickstart", access_mode="read_only")
@@ -130,7 +225,7 @@ reader.close()
 
 Read-only mode requires an existing database and rejects writes.
 
-## 7. Modern Wrapper
+## 8. Modern Wrapper
 
 If you prefer a more Pythonic, typed surface:
 

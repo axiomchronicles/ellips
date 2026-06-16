@@ -168,7 +168,7 @@ Executed successfully:
 - direct unsandboxed Python replace-key repro
 - `ctest --test-dir build --output-on-failure`
 - `PYTHONPATH=bindings/python python3 tests/python/test_bindings.py`
-- `PYTHONPATH=bindings/python python3 bindings/python/test.py --mode all`
+- `PYTHONPATH=bindings/python python3 bindings/python/test.py --gpu-algorithm ivf_pq`
 
 Observed results:
 
@@ -179,7 +179,8 @@ Observed results:
 - full C++ suite passed: `163/163` with `GpuMemoryPoolTest.acquire_and_release`
   still intentionally skipped by the existing test
 - full Python binding suite passed: `30/30`
-- full GPU showcase completed in one normal Python process without `os._exit()`
+- Python binding example script completed in one normal Python process without
+  `os._exit()`
 
 ## Residual Gaps
 

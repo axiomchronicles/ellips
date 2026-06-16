@@ -88,6 +88,8 @@ The `_has_gpu` flag is a module-level boolean that user code can check before ac
 if elips._has_gpu:
     gpu = elips.GpuConfig()
     gpu.policy = elips.GpuPolicy.prefer_gpu
+    gpu.algorithm = elips.GpuIndexAlgorithm.ivf_flat
+    gpu.ivf_pq_params.n_lists = 1024
 else:
     print("CPU only")
 ```
