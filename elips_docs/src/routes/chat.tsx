@@ -226,10 +226,7 @@ function ChatPage() {
           )}
 
           {messages.map((m: (typeof messages)[number]) => {
-            const text = m.parts
-              .filter((p): p is Extract<typeof p, { type: "text" }> => p.type === "text")
-              .map((p) => p.text)
-              .join("");
+            const text = m.content;
             const isUser = m.role === "user";
             const refs = !isUser ? relatedDocs(text) : [];
             return (
@@ -251,20 +248,21 @@ function ChatPage() {
                             return <>{children}</>;
                           },
                           code({
-                            inline,
+                            node,
                             className,
                             children,
                             ...props
                           }: ComponentPropsWithoutRef<"code"> & {
-                            inline?: boolean;
+                            node?: any;
                           }) {
                             const code = String(children).replace(/\n$/, "");
-                            if (!inline) {
-                              const match = /language-(\w+)/.exec(className || "");
+                            const match = /language-(\w+)/.exec(className || "");
+                            const isInline = !match && !code.includes("\n");
+                            if (!isInline) {
                               const isSupportedLang = (
                                 l: string,
                               ): l is "python" | "cpp" | "bash" | "eql" | "json" | "text" => {
-                                return ["python", "cpp", "bash", "eql", "json", "text"].includes(l);
+                                                return ["python", "cpp", "bash", "eql", "json", "text"].includes(l);
                               };
                               const rawLang = match ? match[1] : "text";
                               const lang = isSupportedLang(rawLang) ? rawLang : "text";
