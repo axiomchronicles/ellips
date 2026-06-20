@@ -28,23 +28,63 @@ export const Route = createFileRoute("/faq")({
               name: "Is ELIPS a database server?",
               acceptedAnswer: {
                 "@type": "Answer",
-                text: "No. ELIPS is an embedded engine. A database is a directory on disk, opened by your process.",
+                text: "No. ELIPS is an embedded engine. A database is a directory on disk and an open handle in your process. There is no daemon to install and no network port to open.",
               },
             },
             {
               "@type": "Question",
-              name: "Does ELIPS need a network connection?",
+              name: "Can multiple processes share a database?",
               acceptedAnswer: {
                 "@type": "Answer",
-                text: "No. The runtime does not open sockets or call out to remote services.",
+                text: "One writer at a time, many readers. The writer takes an exclusive advisory file lock; readers take shared locks via access_mode=\"read_only\".",
               },
             },
             {
               "@type": "Question",
-              name: "Can multiple processes read the same database?",
+              name: "What embeddings does ELIPS use?",
               acceptedAnswer: {
                 "@type": "Answer",
-                text: "Yes. Open with access_mode=read_only to take a shared advisory lock.",
+                text: "New databases attach a built-in local text embedder automatically. You can attach a rehydratable local embedder, a custom Python callable, or disable auto-attach entirely.",
+              },
+            },
+            {
+              "@type": "Question",
+              name: "What happens on a crash?",
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: "The WAL is replayed on the next open. Each record is CRC32C-framed; replay truncates at the first invalid record and preserves the valid prefix.",
+              },
+            },
+            {
+              "@type": "Question",
+              name: "How big can a vault get?",
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: "ELIPS is designed for the embedded scale — millions of vectors comfortably, larger with segmented storage and HNSW tuned for memory budget. There is no hard ceiling baked into the format.",
+              },
+            },
+            {
+              "@type": "Question",
+              name: "Does ELIPS require a GPU?",
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: "No. The default build is CPU-only. Compile with -DELIPS_GPU_ENABLED=ON to opt in to the GPU index family.",
+              },
+            },
+            {
+              "@type": "Question",
+              name: "Why C++23?",
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: "std::span, concepts, designated initialisers, and structured bindings let the public surface stay precisely typed without overhead.",
+              },
+            },
+            {
+              "@type": "Question",
+              name: "Where can I report a bug?",
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: "Open an issue on the GitHub tracker. Include the output of elips info and elips verify when relevant.",
               },
             },
           ],
