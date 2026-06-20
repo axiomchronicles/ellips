@@ -5,7 +5,10 @@ export const Route = createFileRoute("/changelog")({
   head: () => ({
     meta: [
       { title: "Changelog — ELIPS" },
-      { name: "description", content: "What shipped in each ELIPS release — features, fixes, and deferred work." },
+      {
+        name: "description",
+        content: "What shipped in each ELIPS release — features, fixes, and deferred work.",
+      },
       { property: "og:title", content: "Changelog — ELIPS" },
       { property: "og:description", content: "ELIPS release notes." },
       { property: "og:url", content: "/changelog" },
@@ -52,17 +55,28 @@ const ENTRIES = [
 
 function Page() {
   return (
-    <StandalonePage eyebrow="Project" title="Changelog" lede="Versions are tagged in the repository. This page mirrors the project's release notes and the documented roadmap.">
+    <StandalonePage
+      eyebrow="Project"
+      title="Changelog"
+      lede="Versions are tagged in the repository. This page mirrors the project's release notes and the documented roadmap."
+    >
       <div className="not-prose space-y-10">
         {ENTRIES.map((e) => (
-          <article key={e.v} className="grid grid-cols-12 gap-6 pt-6 hairline-t first:border-t-0 first:pt-0">
+          <article
+            key={e.v}
+            className="grid grid-cols-12 gap-6 pt-6 hairline-t first:border-t-0 first:pt-0"
+          >
             <div className="col-span-12 md:col-span-3">
               <div className="eyebrow text-primary">{e.tag}</div>
-              <div className="text-ink text-[22px] mt-1" style={{ letterSpacing: "-0.01em" }}>{e.v}</div>
+              <div className="text-ink text-[22px] mt-1" style={{ letterSpacing: "-0.01em" }}>
+                {e.v}
+              </div>
               <div className="text-muted text-[13px] mt-1">{e.date}</div>
             </div>
             <ul className="col-span-12 md:col-span-9 prose">
-              {e.items.map((it) => <li key={it}>{it}</li>)}
+              {e.items.map((it) => (
+                <li key={it}>{it}</li>
+              ))}
             </ul>
           </article>
         ))}

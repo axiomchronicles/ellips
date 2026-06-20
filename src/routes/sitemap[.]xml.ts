@@ -28,7 +28,9 @@ export const Route = createFileRoute("/sitemap.xml")({
           { path: "/cookies", changefreq: "yearly", priority: "0.2" },
         ];
         const docsEntries: SitemapEntry[] = docs.map((d) => ({
-          path: d.path, changefreq: "weekly", priority: "0.8",
+          path: d.path,
+          changefreq: "weekly",
+          priority: "0.8",
         }));
         const entries = [...staticPages, ...docsEntries];
 
@@ -39,7 +41,9 @@ export const Route = createFileRoute("/sitemap.xml")({
             e.changefreq ? `    <changefreq>${e.changefreq}</changefreq>` : null,
             e.priority ? `    <priority>${e.priority}</priority>` : null,
             `  </url>`,
-          ].filter(Boolean).join("\n"),
+          ]
+            .filter(Boolean)
+            .join("\n"),
         );
 
         const xml = [
