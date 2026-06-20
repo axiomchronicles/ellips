@@ -6,9 +6,17 @@ export const Route = createFileRoute("/docs/installation")({
   head: () => ({
     meta: [
       { title: "Installation — ELIPS Docs" },
-      { name: "description", content: "Build the ELIPS C++23 core, install the Python bindings, and verify your toolchain." },
+      {
+        name: "description",
+        content:
+          "Build the ELIPS C++23 core, install the Python bindings, and verify your toolchain.",
+      },
       { property: "og:title", content: "Installation — ELIPS" },
-      { property: "og:description", content: "Build the ELIPS C++23 core, install the Python bindings, and verify your toolchain." },
+      {
+        property: "og:description",
+        content:
+          "Build the ELIPS C++23 core, install the Python bindings, and verify your toolchain.",
+      },
       { property: "og:url", content: "/docs/installation" },
     ],
     links: [{ rel: "canonical", href: "/docs/installation" }],
@@ -18,17 +26,20 @@ export const Route = createFileRoute("/docs/installation")({
 
 function Page() {
   return (
-    <DocsShell eyebrow="Start" title="Installation" toc={[
-      { id: "requirements", label: "Requirements" },
-      { id: "build", label: "Building from source" },
-      { id: "python", label: "Python bindings" },
-      { id: "verify", label: "Verify" },
-      { id: "gpu", label: "Optional GPU build" },
-    ]}>
+    <DocsShell
+      eyebrow="Start"
+      title="Installation"
+      toc={[
+        { id: "requirements", label: "Requirements" },
+        { id: "build", label: "Building from source" },
+        { id: "python", label: "Python bindings" },
+        { id: "verify", label: "Verify" },
+        { id: "gpu", label: "Optional GPU build" },
+      ]}
+    >
       <p className="text-[18px] text-ink">
-        ELIPS builds with CMake and ships its Python module through
-        PyBind11. A single configure + build produces both the C++ static
-        library and the Python extension.
+        ELIPS builds with CMake and ships its Python module through PyBind11. A single configure +
+        build produces both the C++ static library and the Python extension.
       </p>
 
       <h2 id="requirements">Requirements</h2>
@@ -42,7 +53,7 @@ function Page() {
 
       <h2 id="build">Building from source</h2>
       <CodeBlock lang="bash" filename="terminal">
-{`git clone https://github.com/axiomchronicles/ellips.git
+        {`git clone https://github.com/axiomchronicles/ellips.git
 cd ellips
 
 cmake -S . -B build -G Ninja \\
@@ -51,25 +62,65 @@ cmake -S . -B build -G Ninja \\
 cmake --build build -j`}
       </CodeBlock>
       <p>
-        The default configuration builds the runtime, the <code>elips</code> CLI,
-        and the PyBind11 module. Toggle features through CMake variables:
+        The default configuration builds the runtime, the <code>elips</code> CLI, and the PyBind11
+        module. Toggle features through CMake variables:
       </p>
       <table>
-        <thead><tr><th>Variable</th><th>Default</th><th>Purpose</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Variable</th>
+            <th>Default</th>
+            <th>Purpose</th>
+          </tr>
+        </thead>
         <tbody>
-          <tr><td><code>ELIPS_BUILD_PYTHON</code></td><td><code>OFF</code></td><td>Build the Python extension.</td></tr>
-          <tr><td><code>ELIPS_BUILD_CLI</code></td><td><code>ON</code></td><td>Build the <code>elips</code> command.</td></tr>
-          <tr><td><code>ELIPS_BUILD_TESTS</code></td><td><code>ON</code></td><td>Build the C++ test suite for <code>ctest</code>.</td></tr>
-          <tr><td><code>ELIPS_GPU_ENABLED</code></td><td><code>OFF</code></td><td>Compile the GPU index family.</td></tr>
+          <tr>
+            <td>
+              <code>ELIPS_BUILD_PYTHON</code>
+            </td>
+            <td>
+              <code>OFF</code>
+            </td>
+            <td>Build the Python extension.</td>
+          </tr>
+          <tr>
+            <td>
+              <code>ELIPS_BUILD_CLI</code>
+            </td>
+            <td>
+              <code>ON</code>
+            </td>
+            <td>
+              Build the <code>elips</code> command.
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <code>ELIPS_BUILD_TESTS</code>
+            </td>
+            <td>
+              <code>ON</code>
+            </td>
+            <td>
+              Build the C++ test suite for <code>ctest</code>.
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <code>ELIPS_GPU_ENABLED</code>
+            </td>
+            <td>
+              <code>OFF</code>
+            </td>
+            <td>Compile the GPU index family.</td>
+          </tr>
         </tbody>
       </table>
 
       <h2 id="python">Python bindings</h2>
-      <p>
-        After the build completes, point Python at the bindings directory:
-      </p>
+      <p>After the build completes, point Python at the bindings directory:</p>
       <CodeBlock lang="bash">
-{`export PYTHONPATH=$PWD/bindings/python
+        {`export PYTHONPATH=$PWD/bindings/python
 python3 -c "import elips; print(elips.__doc__)"`}
       </CodeBlock>
       <p>
@@ -79,18 +130,17 @@ python3 -c "import elips; print(elips.__doc__)"`}
 
       <h2 id="verify">Verify</h2>
       <CodeBlock lang="bash">
-{`ctest --test-dir build --output-on-failure
+        {`ctest --test-dir build --output-on-failure
 PYTHONPATH=bindings/python python3 tests/python/test_bindings.py`}
       </CodeBlock>
 
       <h2 id="gpu">Optional GPU build</h2>
       <p>
-        The GPU index family lives under <code>src/gpu_engine/</code> and is
-        compiled when <code>-DELIPS_GPU_ENABLED=ON</code> is set. Backend
-        selection happens at runtime via the device manager; CUDA, Metal,
-        and a portable fallback are supported. Domain code only ever talks
-        to <code>GpuPort</code>, so the runtime falls back to CPU indexes
-        when no GPU is available.
+        The GPU index family lives under <code>src/gpu_engine/</code> and is compiled when{" "}
+        <code>-DELIPS_GPU_ENABLED=ON</code> is set. Backend selection happens at runtime via the
+        device manager; CUDA, Metal, and a portable fallback are supported. Domain code only ever
+        talks to <code>GpuPort</code>, so the runtime falls back to CPU indexes when no GPU is
+        available.
       </p>
     </DocsShell>
   );
